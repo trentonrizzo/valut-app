@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { AuthCard } from '../components/layout/AuthCard'
+import { formatAuthError } from '../lib/authMessages'
 
 export function Register() {
   const { user, loading, signUp } = useAuth()
@@ -42,11 +43,11 @@ export function Register() {
     const { error: err } = await signUp(email.trim(), password)
     setSubmitting(false)
     if (err) {
-      setError(err.message)
+      setError(formatAuthError(err.message))
       return
     }
     setInfo(
-      'Check your email to confirm your account if required by your project settings. You can sign in once your account is active.',
+      'If your project requires email confirmation, check your inbox and click the link—then sign in. If confirmation is disabled, you’ll be signed in automatically.',
     )
   }
 

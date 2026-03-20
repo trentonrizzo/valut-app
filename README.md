@@ -19,11 +19,11 @@ A dark-themed cloud storage UI built with **React**, **Vite**, **TypeScript**, a
 
 ## Local environment
 
-```bash
-cp .env.example .env
-```
+Copy `.env.example` to `.env` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` from **Project Settings → API** (the anon key is safe to use in the browser; `.env` is gitignored).
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env` to your project values.
+If your database was created before the `profiles_insert_own` policy existed, run [`supabase/migrations/20260320220000_profiles_insert_policy.sql`](supabase/migrations/20260320220000_profiles_insert_policy.sql) in the SQL Editor so client-side profile upserts work.
+
+**Email confirmation:** If **Authentication → Providers → Email → Confirm email** is enabled, new users must confirm before login. For local testing you can disable confirmation or use the confirmation link from the email log.
 
 ## Scripts
 

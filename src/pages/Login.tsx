@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { AuthCard } from '../components/layout/AuthCard'
+import { formatAuthError } from '../lib/authMessages'
 
 export function Login() {
   const { user, loading, signIn } = useAuth()
@@ -31,7 +32,7 @@ export function Login() {
     const { error: err } = await signIn(email.trim(), password)
     setSubmitting(false)
     if (err) {
-      setError(err.message)
+      setError(formatAuthError(err.message))
       return
     }
   }
