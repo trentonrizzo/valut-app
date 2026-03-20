@@ -37,9 +37,17 @@ If your database was created before the `profiles_insert_own` policy existed, ru
 ## App structure
 
 - `src/lib/supabase.ts` — Supabase client (session persistence enabled)
-- `src/context/` — Auth provider and `useAuth` hook
+- `src/lib/albumQueries.ts` — Album fetch with item counts (`items(count)`)
+- `src/context/` — Auth provider, `useAuth`, toasts (`ToastProvider` / `useToast`)
 - `src/pages/` — Home, Login, Register, Dashboard
-- `src/components/` — Layout, album grid/cards, create-album modal
+- `src/components/albums/` — Grid, cards, create/rename/delete modals, card menu (⋯)
+
+### Albums
+
+- Create, rename, and delete albums (delete uses a confirmation modal)
+- Item counts per album (from Supabase)
+- Toasts for create / rename / delete
+- Optimistic UI for create, rename, and delete
 
 ## Routes
 

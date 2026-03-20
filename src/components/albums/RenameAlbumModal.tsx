@@ -2,22 +2,23 @@ import { useEffect, useState, type FormEvent } from 'react'
 
 type Props = {
   open: boolean
+  initialName: string
   onClose: () => void
-  onCreate: (name: string) => Promise<void>
+  onRename: (name: string) => Promise<void>
 }
 
-export function CreateAlbumModal({ open, onClose, onCreate }: Props) {
-  const [name, setName] = useState('')
+export function RenameAlbumModal({ open, initialName, onClose, onRename }: Props) {
+  const [name, setName] = useState(initialName)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
-      setName('')
+      setName(initialName)
       setError(null)
       setSubmitting(false)
     }
-  }, [open])
+  }, [open, initialName])
 
   if (!open) return null
 
@@ -28,14 +29,17 @@ export function CreateAlbumModal({ open, onClose, onCreate }: Props) {
       setError('Enter a name.')
       return
     }
+    if (trimmed === initialName.trim()) {
+      onClose()
+      return
+    }
     setError(null)
     setSubmitting(true)
     try {
-      await onCreate(trimmed)
-      setName('')
+      await onRename(trimmed)
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create album.')
+      setError(err instanceof Error ? err.message : 'Could not rename album.')
     } finally {
       setSubmitting(false)
     }
@@ -53,7 +57,7 @@ export function CreateAlbumModal({ open, onClose, onCreate }: Props) {
         className="modal modal--enter"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="create-album-title"
+        aria-labelledby="rename-album-title"
         onClick={(ev) => ev.stopPropagation()}
       >
         <button
@@ -65,20 +69,19 @@ export function CreateAlbumModal({ open, onClose, onCreate }: Props) {
         >
           ×
         </button>
-        <h2 id="create-album-title" className="modal__title">
-          New album
+        <h2 id="rename-album-title" className="modal__title">
+          Rename album
         </h2>
         <form onSubmit={handleSubmit} className="modal__form">
-          <label htmlFor="album-name" className="field-label">
+          <label htmlFor="rename-album-name" className="field-label">
             Name
           </label>
           <input
-            id="album-name"
+            id="rename-album-name"
             type="text"
             className="field-input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Summer 2025"
             autoComplete="off"
             autoFocus
             disabled={submitting}
@@ -89,7 +92,7 @@ export function CreateAlbumModal({ open, onClose, onCreate }: Props) {
               Cancel
             </button>
             <button type="submit" className="btn btn--primary" disabled={submitting}>
-              {submitting ? 'Creating…' : 'Create'}
+              {submitting ? 'Saving…' : 'Save'}
             </button>
           </div>
         </form>
