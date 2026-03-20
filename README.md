@@ -49,6 +49,14 @@ If your database was created before the `profiles_insert_own` policy existed, ru
 - Toasts for create / rename / delete
 - Optimistic UI for create, rename, and delete
 
+## Vercel (SPA routing)
+
+[`vercel.json`](vercel.json) uses **`rewrites`** so unknown paths fall back to **`/index.html`**, while real files under **`dist/`** (for example **`/assets/*.js`**) are still served as static assets first.
+
+Do **not** use a legacy **`routes`** catch‑all that sends every request to **`/`**—that can make the browser request **`/assets/...js`** and receive **HTML** instead of JavaScript (MIME error → blank/black screen).
+
+In the Vercel project settings, use the **Vite** preset (or set **Output Directory** to **`dist`**).
+
 ## Routes
 
 | Path | Description |
