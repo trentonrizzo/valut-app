@@ -57,6 +57,8 @@ Do **not** use a legacy **`routes`** catch‑all that sends every request to **`
 
 In the Vercel project settings, use the **Vite** preset (or set **Output Directory** to **`dist`**).
 
+**Environment variables:** Add **`VITE_SUPABASE_URL`** and **`VITE_SUPABASE_ANON_KEY`** to the Vercel project (Production and Preview). If they are missing at build time, older code passed empty strings into `createClient`, which **throws at import time** and produced a blank page. The client now uses safe placeholders when env is missing so the UI still loads; you’ll see an **EnvBanner** until credentials are set.
+
 ## Routes
 
 | Path | Description |

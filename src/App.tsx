@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthProvider'
 import { ToastProvider } from './context/ToastContext'
+import { EnvBanner } from './components/layout/EnvBanner'
 import { ProtectedRoute } from './components/layout/ProtectedRoute'
 import { Home } from './pages/Home'
 import { Login } from './pages/Login'
@@ -11,6 +12,7 @@ export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
+        <EnvBanner />
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Home />} />

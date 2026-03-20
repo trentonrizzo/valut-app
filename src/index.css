@@ -38,6 +38,27 @@ body {
   min-height: 100svh;
 }
 
+.env-banner {
+  position: sticky;
+  top: 0;
+  z-index: 300;
+  padding: 0.65rem 1rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #fef3c7;
+  background: rgba(180, 83, 9, 0.95);
+  border-bottom: 1px solid rgba(251, 191, 36, 0.35);
+  text-align: center;
+}
+
+.env-banner code {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  padding: 0.1rem 0.35rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
 #root {
   min-height: 100svh;
 }
