@@ -4,32 +4,14 @@ import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
 import { fetchAlbumsWithCounts, mapAlbumRow } from '../lib/albumQueries'
-import { deleteFromVault } from '../../lib/vaultApi'
 import type { AlbumWithMeta } from '../types/album'
-import type { VaultFile } from '../types/vault-file'
 import { AlbumGrid } from '../components/albums/AlbumGrid'
 import { CreateAlbumModal } from '../components/albums/CreateAlbumModal'
 import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
-import { ConfirmDeleteFileModal } from '../components/albums/ConfirmDeleteFileModal'
-
-function keyFromUrl(url: string) {
-  const str = String(url || '').trim()
-  if (!str) return ''
-
-  const marker = '/'
-  if (/^https?:\/\//i.test(str)) {
-    const parts = str.split('://')
-    if (parts.length < 2) return ''
-    const afterHost = parts[1].split('/').slice(1).join('/')
-    return afterHost || ''
-  }
-
-  return str.startsWith(marker) ? str.slice(1) : str
-}
 
 export function Dashboard() {
-  const { user, session, signOut } = useAuth()
+  const { user, signOut } = useAuth()
   const { showToast } = useToast()
 
   const [albums, setAlbums] = useState<AlbumWithMeta[]>([])
@@ -43,16 +25,22 @@ export function Dashboard() {
   const [creatingAlbum, setCreatingAlbum] = useState(false)
 
   const [openAlbumId, setOpenAlbumId] = useState<string | null>(null)
-  const [files, setFiles] = useState<Array<{ id: string; file_url: string }>>([])
-  const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([])
-  const [vaultLoading, setVaultLoading] = useState(false)
-  const [vaultError, setVaultError] = useState<string | null>(null)
-  const [uploading] = useState(false)
-  const [deleteFileTarget, setDeleteFileTarget] = useState<VaultFile | null>(null)
-  const [deletingFile, setDeletingFile] = useState(false)
+  type FileRow = {
+    id: string
+    user_id: string
+    album_id: string
+    file_name: string
+    file_url: string
+    created_at: string
+  }
 
-  const accessToken = session?.access_token ?? ''
-  const albumId = openAlbumId
+  const [files, setFiles] = useState<FileRow[]>([])
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [filesError, setFilesError] = useState<string | null>(null)
+
+  const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null)
 
   const setBusy = useCallback((id: string, on: boolean) => {
     setBusyIds((prev) => {
@@ -65,12 +53,14 @@ export function Dashboard() {
 
   const refreshAlbums = useCallback(async () => {
     if (!user) return
+
     const { data, error } = await fetchAlbumsWithCounts(user.id)
     if (error) {
       setFetchError(error)
       setAlbums([])
       return
     }
+
     setFetchError(null)
     setAlbums(data ?? [])
   }, [user])
@@ -79,33 +69,6 @@ export function Dashboard() {
     () => albums.find((a) => a.id === openAlbumId) ?? null,
     [albums, openAlbumId],
   )
-
-  const refreshAlbumFiles = useCallback(async () => {
-    if (!openAlbumId) {
-      setVaultFiles([])
-      return
-    }
-
-    setVaultLoading(true)
-    setVaultError(null)
-
-    try {
-      const { data, error } = await supabase
-        .from('items')
-        .select('*')
-        .eq('album_id', openAlbumId)
-        .order('created_at', { ascending: false })
-
-      if (error) throw new Error(error.message)
-
-      setVaultFiles((data as VaultFile[]) ?? [])
-    } catch (e) {
-      setVaultFiles([])
-      setVaultError(e instanceof Error ? e.message : 'Could not load album files')
-    } finally {
-      setVaultLoading(false)
-    }
-  }, [openAlbumId])
 
   useEffect(() => {
     if (!user) return
@@ -136,18 +99,39 @@ export function Dashboard() {
   }, [user, openAlbumId])
 
   useEffect(() => {
-    void refreshAlbumFiles()
-  }, [refreshAlbumFiles])
+    if (!user || !openAlbumId) {
+      setFiles([])
+      return
+    }
 
-  useEffect(() => {
-    if (!albumId) return
+    let cancelled = false
+    setFilesLoading(true)
+    setFilesError(null)
 
-    supabase
-      .from('files')
-      .select('*')
-      .eq('album_id', albumId)
-      .then(({ data }) => setFiles((data as Array<{ id: string; file_url: string }>) || []))
-  }, [albumId])
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('files')
+          .select('*')
+          .eq('album_id', openAlbumId)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+
+        if (error) throw new Error(error.message)
+        if (!cancelled) setFiles((data as FileRow[]) ?? [])
+      } catch (e) {
+        if (cancelled) return
+        setFiles([])
+        setFilesError(e instanceof Error ? e.message : 'Could not load files')
+      } finally {
+        if (!cancelled) setFilesLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user, openAlbumId])
 
   async function handleCreateAlbum(name: string) {
     if (!user) throw new Error('Not signed in.')
@@ -173,7 +157,7 @@ export function Dashboard() {
 
       if (error) throw new Error(error.message)
 
-      const real = mapAlbumRow({ ...data, items: [{ count: 0 }] })
+      const real = mapAlbumRow({ ...data, files: [{ count: 0 }] })
       setAlbums((prev) => prev.map((a) => (a.id === tempId ? real : a)))
       setOpenAlbumId(real.id)
       showToast('Album created')
@@ -241,66 +225,93 @@ export function Dashboard() {
 
   async function handleUpload(file: File, albumId: string) {
     if (!file) return
+    if (!user) {
+      showToast('Please sign in to upload.', 'error')
+      return
+    }
+    if (!albumId) {
+      showToast('Open an album before uploading.', 'error')
+      return
+    }
 
-    const res = await fetch("/api/r2-upload-url", {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: file.name }),
-    })
+    const activeAlbum = albums.find((a) => a.id === albumId)
+    if (!activeAlbum) {
+      showToast('Album not found.', 'error')
+      return
+    }
 
-    const { uploadUrl, fileUrl } = await res.json()
-
-    await fetch(uploadUrl, {
-      method: 'PUT',
-      body: file,
-      headers: { 'Content-Type': file.type },
-    })
-
-    await supabase.from('files').insert({
-      file_name: file.name,
-      file_url: fileUrl,
-      album_id: albumId,
-    })
-
-    const { data } = await supabase
-      .from('files')
-      .select('*')
-      .eq('album_id', albumId)
-
-    setFiles((data as Array<{ id: string; file_url: string }>) || [])
-
-    alert('UPLOAD COMPLETE')
-  }
-
-  async function handleDeleteFileConfirm() {
-    if (!deleteFileTarget || !user || !accessToken) return
-
-    setDeletingFile(true)
+    setUploading(true)
+    setUploadProgress(0)
+    setUploadFileName(file.name)
 
     try {
-      const key = keyFromUrl(deleteFileTarget.url)
-      if (!key) throw new Error('Could not determine storage object key from file URL')
+      const presignRes = await fetch("/api/r2-upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: file.name }),
+      })
 
-      await deleteFromVault(key, user.id, accessToken)
+      const presign = await presignRes.json()
 
-      const { error } = await supabase
-        .from('items')
-        .delete()
-        .eq('id', deleteFileTarget.id)
-        .eq('album_id', deleteFileTarget.album_id)
-
-      if (error) {
-        throw new Error(`Storage delete succeeded, but metadata delete failed: ${error.message}`)
+      if (!presignRes.ok || presign?.ok !== true || !presign.uploadUrl || !presign.fileUrl) {
+        throw new Error(presign?.error || 'Could not create upload URL')
       }
 
-      setVaultFiles((prev) => prev.filter((f) => f.id !== deleteFileTarget.id))
+      const { uploadUrl, fileUrl } = presign as { uploadUrl: string; fileUrl: string }
+
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open("PUT", uploadUrl, true)
+        xhr.setRequestHeader("Content-Type", "application/octet-stream")
+
+        xhr.upload.onprogress = (event) => {
+          if (!event.lengthComputable) return
+          const percent = Math.round((event.loaded / event.total) * 100)
+          setUploadProgress(percent)
+        }
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setUploadProgress(100)
+            resolve()
+          }
+          else reject(new Error(`Upload failed (${xhr.status})`))
+        }
+
+        xhr.onerror = () => reject(new Error('Upload failed'))
+
+        xhr.send(file)
+      })
+
+      const { error: insertError } = await supabase.from('files').insert({
+        user_id: user.id,
+        album_id: albumId,
+        file_name: file.name,
+        file_url: fileUrl,
+      })
+
+      if (insertError) throw new Error(insertError.message)
+
+      const { data, error: selectError } = await supabase
+        .from('files')
+        .select('*')
+        .eq('album_id', albumId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+
+      if (selectError) throw new Error(selectError.message)
+
+      setFiles((data as FileRow[]) ?? [])
       await refreshAlbums()
-      showToast('File deleted')
-      setDeleteFileTarget(null)
+
+      showToast('Upload complete')
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Delete failed', 'error')
+      showToast(e instanceof Error ? e.message : 'Upload failed', 'error')
+      console.error(e)
     } finally {
-      setDeletingFile(false)
+      setUploading(false)
+      setUploadProgress(0)
+      setUploadFileName(null)
     }
   }
 
@@ -389,7 +400,6 @@ Upload files
                 multiple
                 disabled={uploading || !openAlbum}
                 onChange={(e) => {
-                  console.log("UPLOAD CLICKED")
                   const file = e.target.files?.[0]
                   if (file && openAlbum) {
                     void handleUpload(file, openAlbum.id)
@@ -400,53 +410,83 @@ Upload files
             </label>
           </div>
 
-          {vaultError ? (
-            <div className="banner banner--error" role="alert">
-              <strong>Could not load files.</strong> {vaultError}
+          {uploading ? (
+            <div className="modal-backdrop" role="presentation">
+              <div
+                className="modal modal--enter"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="upload-progress-title"
+                onClick={(ev) => ev.stopPropagation()}
+              >
+                <h2 id="upload-progress-title" className="modal__title">
+                  Uploading
+                </h2>
+                <p className="modal__body-text">{uploadFileName ?? 'File'}</p>
+                <div
+                  style={{
+                    height: 10,
+                    borderRadius: 999,
+                    background: 'var(--border)',
+                    overflow: 'hidden',
+                    marginTop: '0.75rem',
+                  }}
+                  aria-label="Upload progress"
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${uploadProgress}%`,
+                      background: 'linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,255,255,0.35))',
+                      transition: 'width 0.15s ease',
+                    }}
+                  />
+                </div>
+                <p className="modal__body-text" style={{ marginTop: '0.6rem' }}>
+                  {uploadProgress}%
+                </p>
+              </div>
             </div>
           ) : null}
 
-          {vaultLoading ? (
+          {filesError ? (
+            <div className="banner banner--error" role="alert">
+              <strong>Could not load files.</strong> {filesError}
+            </div>
+          ) : null}
+
+          {filesLoading ? (
             <div className="vault-loading">Loading files…</div>
           ) : !openAlbum ? (
             <div className="vault-empty">Select an album to view files.</div>
-          ) : vaultFiles.length === 0 ? (
+          ) : files.length === 0 ? (
             <div className="vault-empty">No files in this album yet.</div>
           ) : (
             <ul className="vault-grid">
-              {vaultFiles.map((file) => (
-                <li key={file.id} className="vault-file-card">
-                  <a href={file.url} target="_blank" rel="noreferrer" className="vault-file-preview">
-                    {file.type === 'image' ? (
-                      <img src={file.url} alt="Uploaded file" loading="lazy" />
-                    ) : file.type === 'video' ? (
-                      <video src={file.url} muted playsInline preload="metadata" />
-                    ) : (
-                      <div className="vault-file-fallback">FILE</div>
-                    )}
-                  </a>
-                  <div className="vault-file-meta">
-                    <p className="vault-file-name" title={file.url}>
-                      {file.url.split('/').pop() ?? 'file'}
-                    </p>
-                    <p className="vault-file-sub">{new Date(file.created_at).toLocaleString()}</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn--ghost vault-delete-btn"
-                    onClick={() => setDeleteFileTarget(file)}
-                    disabled={deletingFile}
-                  >
-                    Delete
-                  </button>
-                </li>
-              ))}
+              {files.map((f) => {
+                const lower = f.file_name.toLowerCase()
+                const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(lower)
+
+                return (
+                  <li key={f.id} className="vault-file-card">
+                    <a href={f.file_url} target="_blank" rel="noreferrer" className="vault-file-preview">
+                      {isVideo ? (
+                        <video src={f.file_url} muted playsInline preload="metadata" />
+                      ) : (
+                        <img src={f.file_url} alt={f.file_name} loading="lazy" />
+                      )}
+                    </a>
+                    <div className="vault-file-meta">
+                      <p className="vault-file-name" title={f.file_name}>
+                        {f.file_name}
+                      </p>
+                      <p className="vault-file-sub">{new Date(f.created_at).toLocaleString()}</p>
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           )}
-
-          {files.map((f) => (
-            <img key={f.id} src={f.file_url} style={{ width: '100%' }} />
-          ))}
         </section>
       </main>
 
@@ -468,14 +508,6 @@ Upload files
         albumName={deleteTarget?.name ?? ''}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
-      />
-
-      <ConfirmDeleteFileModal
-        open={deleteFileTarget !== null}
-        fileName={deleteFileTarget?.url.split('/').pop() ?? ''}
-        onClose={() => setDeleteFileTarget(null)}
-        onConfirm={handleDeleteFileConfirm}
-        deleting={deletingFile}
       />
     </div>
   )

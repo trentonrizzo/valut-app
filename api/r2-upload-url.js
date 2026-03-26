@@ -10,25 +10,65 @@ const s3 = new S3Client({
   },
 });
 
-export default async function handler(req, res) {
-  try {
-    const { fileName } = req.body;
+function sanitizeFileName(input) {
+  const base = String(input ?? "").trim().split(/[\\/]/).pop() || "file";
+  const sanitized = base
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return sanitized || "file";
+}
 
-    const key = `${Date.now()}-${fileName}`;
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
+
+  try {
+    let body = req.body;
+
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        body = null;
+      }
+    }
+
+    if (!body || typeof body !== "object") {
+      return res.status(200).json({ ok: false, error: "Invalid JSON body" });
+    }
+
+    const fileName = body.fileName;
+    if (!fileName) {
+      return res.status(200).json({ ok: false, error: "fileName is required" });
+    }
+
+    const bucket = process.env.R2_BUCKET;
+    const publicBase = String(process.env.R2_PUBLIC_URL || "").replace(/\/+$/, "");
+
+    if (!bucket || !publicBase) {
+      return res.status(200).json({ ok: false, error: "R2 is not configured" });
+    }
+
+    const sanitizedFileName = sanitizeFileName(fileName);
+    const key = `uploads/${Date.now()}-${sanitizedFileName}`;
 
     const command = new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET,
+      Bucket: bucket,
       Key: key,
       ContentType: "application/octet-stream",
     });
 
     const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 60 });
+    const fileUrl = `${publicBase}/${key}`;
 
-    const fileUrl = `${process.env.R2_PUBLIC_URL}/${key}`;
-
-    res.status(200).json({ uploadUrl, fileUrl });
+    return res.status(200).json({ ok: true, uploadUrl, fileUrl, key });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "R2 ERROR" });
+    return res.status(200).json({
+      ok: false,
+      error: err instanceof Error ? err.message : "Failed to create upload URL",
+    });
   }
 }

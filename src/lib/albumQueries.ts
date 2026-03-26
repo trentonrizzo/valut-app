@@ -1,19 +1,19 @@
 import { supabase } from './supabase'
 import type { AlbumRow, AlbumWithMeta } from '../types/album'
 
-type RowWithCount = AlbumRow & { items?: { count: number }[] | null }
+type RowWithCount = AlbumRow & { files?: { count: number }[] | null }
 
 export function mapAlbumRow(row: RowWithCount): AlbumWithMeta {
-  const c = row.items?.[0]?.count
+  const c = row.files?.[0]?.count
   const itemCount = typeof c === 'number' && !Number.isNaN(c) ? c : Number(c ?? 0)
-  const { items: _items, ...rest } = row
+  const { files: _files, ...rest } = row
   return { ...rest, itemCount }
 }
 
 export async function fetchAlbumsWithCounts(userId: string) {
   const primary = await supabase
     .from('albums')
-    .select('*, items(count)')
+    .select('*, files(count)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
 
