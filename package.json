@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1017.0",
-    "@aws-sdk/s3-request-presigner": "^3.1017.0",
     "@supabase/supabase-js": "^2.99.3",
     "busboy": "^1.6.0",
     "react": "^19.2.4",

@@ -75,7 +75,7 @@ This project uses Vercel serverless handlers in `api/` as the secure backend lay
 
 Server routes:
 
-- `POST /api/r2-presign` → `api/r2-presign.js` (returns presigned PUT URL)
+- `POST /api/upload` → `api/upload.js`
 - `POST /api/delete` → `api/delete.js`
 - `GET|POST /api/list` → `api/list.js`
 
