@@ -54,6 +54,14 @@ export default async function handler(req, res) {
     const userId = fields.userId
     const album = fields.album
 
+    console.info('[UPLOAD] start', {
+      userId,
+      album,
+      fileName: filePart?.fileName,
+      fileType: filePart?.fileType,
+      fileSize: filePart?.buffer?.length,
+    })
+
     if (!filePart || !userId || !album) {
       return sendJson(res, 400, { error: 'file, userId, and album are required' })
     }
@@ -77,6 +85,8 @@ export default async function handler(req, res) {
       album,
       fileName: filePart.fileName,
     })
+
+    console.info('[UPLOAD] success', { key: result.key, url: result.url })
 
     return sendJson(res, 200, result)
   } catch (error) {
