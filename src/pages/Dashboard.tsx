@@ -228,8 +228,27 @@ export function Dashboard() {
   }
 
   async function handleUpload(file: File) {
-    console.log("NEW UPLOAD SYSTEM TRIGGERED", file);
-    alert("NEW SYSTEM ACTIVE - file selected");
+    if (!file) return
+
+    const fileName = `${Date.now()}-${file.name}`
+
+    const { error } = await supabase.storage
+      .from('vault')
+      .upload(fileName, file)
+
+    if (error) {
+      alert('Upload failed')
+      console.error(error)
+      return
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('vault')
+      .getPublicUrl(fileName)
+
+    alert('UPLOAD SUCCESS')
+
+    console.log('File URL:', urlData.publicUrl)
   }
 
   async function handleDeleteFileConfirm() {
