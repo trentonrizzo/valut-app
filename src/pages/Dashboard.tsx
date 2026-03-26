@@ -399,6 +399,7 @@ export function Dashboard() {
                 multiple
                 disabled={uploading || !openAlbum}
                 onChange={(e) => {
+                  console.log("UPLOAD CLICKED")
                   void handleUploadFiles(e.target.files)
                   e.currentTarget.value = ''
                 }}
