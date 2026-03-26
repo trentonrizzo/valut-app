@@ -75,14 +75,14 @@ This project uses Vercel serverless handlers in `api/` as the secure backend lay
 
 Server routes:
 
-- `POST /api/upload` → `api/upload.js`
+- `POST /api/r2-presign` → `api/r2-presign.js` (returns presigned PUT URL)
 - `POST /api/delete` → `api/delete.js`
 - `GET|POST /api/list` → `api/list.js`
 
 Core storage modules:
 
 - `lib/r2Client.js`
-- `lib/r2Upload.js`
+- `lib/r2Upload.js` (server helper still available, upload flow now uses presigned direct PUT)
 - `lib/r2Delete.js`
 - `lib/r2List.js`
 - `lib/vaultApi.js` (frontend fetch helper)
