@@ -33,6 +33,7 @@ export default async function handler(req, res) {
     const result = await listUserFiles(user.id, album)
     return sendJson(res, 200, result)
   } catch (error) {
+    console.error('R2 ERROR:', error)
     const status = error?.statusCode || 500
     return sendJson(res, status, { error: error instanceof Error ? error.message : 'List failed' })
   }

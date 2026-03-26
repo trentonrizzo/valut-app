@@ -26,6 +26,7 @@ export default async function handler(req, res) {
     await deleteFile(key)
     return sendJson(res, 200, { success: true })
   } catch (error) {
+    console.error('R2 ERROR:', error)
     const status = error?.statusCode || 500
     return sendJson(res, status, { error: error instanceof Error ? error.message : 'Delete failed' })
   }
