@@ -129,9 +129,6 @@ export function Dashboard() {
         const list = data ?? []
         setFetchError(null)
         setAlbums(list)
-        if (!openAlbumId && list.length > 0) {
-          setOpenAlbumId(list[0].id)
-        }
       }
 
       setLoading(false)
@@ -140,7 +137,7 @@ export function Dashboard() {
     return () => {
       cancelled = true
     }
-  }, [user, openAlbumId])
+  }, [user])
 
   useEffect(() => {
     if (!user || !openAlbumId) {
