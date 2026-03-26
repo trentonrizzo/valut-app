@@ -30,8 +30,8 @@ export default async function handler(req, res) {
       return sendJson(res, 403, { error: 'User mismatch' })
     }
 
-    const result = await listUserFiles(user.id, album)
-    return sendJson(res, 200, result)
+    const files = await listUserFiles(user.id, album)
+    return sendJson(res, 200, files)
   } catch (error) {
     console.error('R2 ERROR:', error)
     const status = error?.statusCode || 500

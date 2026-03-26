@@ -21,14 +21,6 @@ function formatSize(bytes: number) {
   return `${val.toFixed(val >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`
 }
 
-function isImage(name: string) {
-  return /\.(jpg|jpeg|png|gif|webp|avif|bmp|svg)$/i.test(name)
-}
-
-function isVideo(name: string) {
-  return /\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(name)
-}
-
 function slugifyAlbum(name: string) {
   return name
     .trim()
@@ -85,7 +77,7 @@ export function Dashboard() {
     setVaultLoading(true)
     setVaultError(null)
     try {
-      const { files } = await getVaultFiles(user.id, accessToken)
+      const files = await getVaultFiles(user.id, accessToken)
       setVaultFiles(files)
     } catch (e) {
       setVaultFiles([])
@@ -258,7 +250,7 @@ export function Dashboard() {
 
   const selectedAlbumSlug = slugifyAlbum(selectedAlbum)
   const filteredFiles = selectedAlbumSlug
-    ? vaultFiles.filter((f) => f.albumSlug === selectedAlbumSlug)
+    ? vaultFiles.filter((f) => f.key.includes(`/albums/${selectedAlbumSlug}/`))
     : vaultFiles
 
   return (
@@ -375,20 +367,16 @@ export function Dashboard() {
             <ul className="vault-grid">
               {filteredFiles.map((file) => (
                 <li key={file.key} className="vault-file-card">
-                  <a href={file.url} target="_blank" rel="noreferrer" className="vault-file-preview">
-                    {isImage(file.fileName) ? (
-                      <img src={file.url} alt={file.fileName} loading="lazy" />
-                    ) : isVideo(file.fileName) ? (
-                      <video src={file.url} muted playsInline preload="metadata" />
-                    ) : (
-                      <div className="vault-file-fallback">FILE</div>
-                    )}
-                  </a>
+                  <div className="vault-file-preview">
+                    <div className="vault-file-fallback">FILE</div>
+                  </div>
                   <div className="vault-file-meta">
-                    <p className="vault-file-name" title={file.fileName}>
-                      {file.fileName}
+                    <p className="vault-file-name" title={file.key}>
+                      {file.key.split('/').pop() ?? file.key}
                     </p>
-                    <p className="vault-file-sub">{formatSize(file.size)}</p>
+                    <p className="vault-file-sub">
+                      {formatSize(file.size)}{file.lastModified ? ` · ${new Date(file.lastModified).toLocaleString()}` : ''}
+                    </p>
                   </div>
                   <button
                     type="button"
@@ -427,7 +415,7 @@ export function Dashboard() {
 
       <ConfirmDeleteFileModal
         open={deleteFileTarget !== null}
-        fileName={deleteFileTarget?.fileName ?? ''}
+        fileName={deleteFileTarget?.key?.split('/').pop() ?? ''}
         onClose={() => setDeleteFileTarget(null)}
         onConfirm={handleDeleteFileConfirm}
         deleting={deletingFile}
