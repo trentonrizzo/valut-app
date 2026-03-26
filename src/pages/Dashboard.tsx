@@ -4,7 +4,7 @@ import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
 import { fetchAlbumsWithCounts, mapAlbumRow } from '../lib/albumQueries'
-import { uploadToVault, deleteFromVault } from '../../lib/vaultApi'
+import { deleteFromVault } from '../../lib/vaultApi'
 import type { AlbumWithMeta } from '../types/album'
 import type { VaultFile } from '../types/vault-file'
 import { AlbumGrid } from '../components/albums/AlbumGrid'
@@ -12,12 +12,6 @@ import { CreateAlbumModal } from '../components/albums/CreateAlbumModal'
 import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
 import { ConfirmDeleteFileModal } from '../components/albums/ConfirmDeleteFileModal'
-
-function fileTypeFromMime(mime: string) {
-  if (mime.startsWith('image/')) return 'image'
-  if (mime.startsWith('video/')) return 'video'
-  return 'file'
-}
 
 function keyFromUrl(url: string) {
   const str = String(url || '').trim()
@@ -52,7 +46,7 @@ export function Dashboard() {
   const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([])
   const [vaultLoading, setVaultLoading] = useState(false)
   const [vaultError, setVaultError] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
+  const [uploading] = useState(false)
   const [deleteFileTarget, setDeleteFileTarget] = useState<VaultFile | null>(null)
   const [deletingFile, setDeletingFile] = useState(false)
 
@@ -233,53 +227,9 @@ export function Dashboard() {
     }
   }
 
-  async function handleUploadFiles(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) return
-    if (!user || !accessToken) {
-      showToast('You must be signed in to upload files', 'error')
-      return
-    }
-    if (!openAlbum) {
-      showToast('Open an album before uploading', 'error')
-      return
-    }
-
-    setUploading(true)
-
-    try {
-      const files = Array.from(fileList)
-
-      for (const file of files) {
-        const uploadResult = await uploadToVault(file, user.id, openAlbum.name, accessToken)
-
-        const { error: itemError } = await supabase.from('items').insert({
-          album_id: openAlbum.id,
-          type: fileTypeFromMime(file.type),
-          url: uploadResult.url,
-        })
-
-        if (itemError) {
-          const key = uploadResult.key || keyFromUrl(uploadResult.url)
-          if (key) {
-            try {
-              await deleteFromVault(key, user.id, accessToken)
-            } catch (cleanupErr) {
-              console.error('Cleanup after metadata failure failed:', cleanupErr)
-            }
-          }
-
-          throw new Error(`Uploaded to storage, but saving metadata failed: ${itemError.message}`)
-        }
-      }
-
-      await refreshAlbumFiles()
-      await refreshAlbums()
-      showToast(files.length === 1 ? 'File uploaded' : `${files.length} files uploaded`)
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Upload failed', 'error')
-    } finally {
-      setUploading(false)
-    }
+  async function handleUpload(file: File) {
+    console.log("NEW UPLOAD SYSTEM TRIGGERED", file);
+    alert("NEW SYSTEM ACTIVE - file selected");
   }
 
   async function handleDeleteFileConfirm() {
@@ -392,7 +342,7 @@ export function Dashboard() {
 
           <div className="vault-controls">
             <label className="btn btn--outline vault-upload-btn" aria-disabled={uploading || !openAlbum}>
-              {uploading ? 'Uploading…' : 'Upload files'}
+Upload files
               <input
                 type="file"
                 accept="image/*,video/*"
@@ -400,7 +350,10 @@ export function Dashboard() {
                 disabled={uploading || !openAlbum}
                 onChange={(e) => {
                   console.log("UPLOAD CLICKED")
-                  void handleUploadFiles(e.target.files)
+                  const file = e.target.files?.[0]
+                  if (file) {
+                    void handleUpload(file)
+                  }
                   e.currentTarget.value = ''
                 }}
               />
