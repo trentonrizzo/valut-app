@@ -34,6 +34,8 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
 
   const [playbackRate, setPlaybackRate] = useState(1)
   const [videoLoop, setVideoLoop] = useState(false)
+  const [pullDismiss, setPullDismiss] = useState(0)
+  const pullDismissRef = useRef(0)
 
   // Image zoom/pan state (only used for images)
   const [scale, setScale] = useState(1)
@@ -75,19 +77,26 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
     void el.play().catch(() => {})
   }, [open, isVideo, playbackRate, index])
 
+  const resetPullDismiss = useCallback(() => {
+    pullDismissRef.current = 0
+    setPullDismiss(0)
+  }, [])
+
   const goNext = useCallback(() => {
     if (!files.length) return
     setScale(1)
     setPan({ x: 0, y: 0 })
+    resetPullDismiss()
     onIndexChange((index + 1) % files.length)
-  }, [files.length, index, onIndexChange])
+  }, [files.length, index, onIndexChange, resetPullDismiss])
 
   const goPrev = useCallback(() => {
     if (!files.length) return
     setScale(1)
     setPan({ x: 0, y: 0 })
+    resetPullDismiss()
     onIndexChange((index - 1 + files.length) % files.length)
-  }, [files.length, index, onIndexChange])
+  }, [files.length, index, onIndexChange, resetPullDismiss])
 
   useEffect(() => {
     if (!open) return
@@ -99,6 +108,10 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, onClose, goPrev, goNext])
+
+  useEffect(() => {
+    resetPullDismiss()
+  }, [index, open, resetPullDismiss])
 
   const onWheel: WheelEventHandler<HTMLDivElement> = (e) => {
     if (!file || isVideo) return
@@ -153,6 +166,14 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
       const dx = e.clientX - start.x
       const dy = e.clientY - start.y
       dragDelta.current = { x: dx, y: dy }
+      if (dy > 0 && Math.abs(dy) >= Math.abs(dx) * 0.55) {
+        const p = Math.min(dy, 160)
+        pullDismissRef.current = p
+        setPullDismiss(p)
+      } else {
+        pullDismissRef.current = 0
+        setPullDismiss(0)
+      }
       return
     }
 
@@ -183,9 +204,18 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
       dragDelta.current = { x: dx, y: dy }
 
       if (scale > 1.01) {
+        pullDismissRef.current = 0
+        setPullDismiss(0)
         setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }))
         dragStart.current = { x: e.clientX, y: e.clientY }
         dragDelta.current = { x: 0, y: 0 }
+      } else if (dy > 0 && Math.abs(dy) >= Math.abs(dx) * 0.55) {
+        const p = Math.min(dy, 160)
+        pullDismissRef.current = p
+        setPullDismiss(p)
+      } else {
+        pullDismissRef.current = 0
+        setPullDismiss(0)
       }
     }
   }
@@ -202,6 +232,14 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
     if (!start) return
 
     if (!isVideo && !canNavigate) {
+      resetPullDismiss()
+      resetDrag()
+      return
+    }
+
+    if ((isVideo || scale <= 1.0001) && pullDismissRef.current > 52) {
+      resetPullDismiss()
+      onClose()
       resetDrag()
       return
     }
@@ -210,20 +248,23 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
     const absX = Math.abs(dx)
     const absY = Math.abs(dy)
 
-    // Swipe / drag down to close (vertical gesture wins)
-    const dismissDy = 72
+    // Swipe / drag down to close (fallback when pull offset not tracked)
+    const dismissDy = 64
     if (
       (isVideo || (scale <= 1.0001 && !pinchingRef.current)) &&
       dy > dismissDy &&
       absY > absX * 1.05
     ) {
+      resetPullDismiss()
       onClose()
       resetDrag()
       return
     }
 
+    resetPullDismiss()
+
     // Horizontal swipe — prev/next
-    const hThreshold = 48
+    const hThreshold = 36
     if (absX > hThreshold && absX > absY && (isVideo || !pinchingRef.current)) {
       if (dx < 0) goNext()
       else goPrev()
@@ -249,7 +290,16 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
       onClick={onClose}
       aria-label="Media viewer"
     >
-      <div className="media-viewer" role="dialog" aria-modal="true" onClick={(ev) => ev.stopPropagation()}>
+      <div
+        className="media-viewer"
+        role="dialog"
+        aria-modal="true"
+        onClick={(ev) => ev.stopPropagation()}
+        style={{
+          transform: pullDismiss ? `translateY(${pullDismiss}px)` : undefined,
+          opacity: pullDismiss ? Math.max(0.5, 1 - pullDismiss / 420) : 1,
+        }}
+      >
         <div className="media-viewer__topbar">
           <div className="media-viewer__title">
             <div className="media-viewer__filename" title={file.file_name}>
@@ -323,6 +373,7 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
             onPointerUp={onPointerUp}
             onPointerCancel={(e) => {
               pointerMap.current.delete(e.pointerId)
+              resetPullDismiss()
               resetDrag()
             }}
             onDoubleClick={onDoubleClick}

@@ -953,6 +953,119 @@ button {
   padding: 1.25rem 1.1rem 1.4rem;
 }
 
+.vault-panel--gallery.vault-panel--detail {
+  margin-top: 0.5rem;
+  padding: 0.35rem 0.2rem 0.5rem;
+  border: none;
+  background: transparent;
+}
+
+.vault-gallery-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  margin-bottom: 0.35rem;
+  padding: 0 0.15rem;
+}
+
+.vault-gallery-toolbar__back {
+  padding: 0.35rem 0.55rem;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.vault-gallery-toolbar__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  min-width: 0;
+  flex: 1 1 8rem;
+}
+
+.vault-gallery-toolbar__name {
+  font-size: 1rem;
+  font-weight: 650;
+  margin: 0;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-gallery-toolbar__count {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.vault-gallery-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex: 1 1 auto;
+}
+
+.vault-grid-cols {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.vault-grid-cols__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.vault-grid-cols__btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.vault-grid-cols__btn.is-active {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.vault-grid-cols__btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus);
+}
+
+.vault-grid-cols__icon {
+  display: block;
+  opacity: 0.9;
+}
+
+.vault-sort-select--compact {
+  height: 2rem;
+  font-size: 0.78rem;
+  padding: 0 0.45rem;
+  max-width: 7.5rem;
+}
+
+.vault-upload-btn--toolbar {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.82rem;
+  min-height: 2rem;
+}
+
 .vault-panel__header {
   margin-bottom: 0.9rem;
 }
@@ -1046,35 +1159,9 @@ button {
 }
 
 .vault-grid--gallery {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem;
-}
-
-@media (min-width: 520px) {
-  .vault-grid--gallery {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-  }
-}
-
-@media (min-width: 900px) {
-  .vault-grid--gallery {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-.vault-file-sort-label {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.2rem;
-}
-
-.vault-file-sort-label__text {
-  font-size: 0.68rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  grid-template-columns: repeat(var(--vault-gallery-cols, 3), minmax(0, 1fr));
+  gap: 2px;
+  padding: 0;
 }
 
 .vault-sort-select--files {
@@ -1083,57 +1170,70 @@ button {
   padding-inline: 0.5rem;
 }
 
-.vault-file-card__top {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: stretch;
-  gap: 0.35rem;
-}
-
-.vault-file-more-btn {
-  flex-shrink: 0;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--surface-elevated);
-  color: var(--text-muted);
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
+.vault-upload-overlay {
+  z-index: 290;
+  align-items: flex-end;
   justify-content: center;
-  padding: 0;
+  padding: 0.75rem;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  background: rgba(0, 0, 0, 0.45);
 }
 
-.vault-file-more-btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--focus);
+.vault-upload-chip {
+  width: 100%;
+  max-width: 380px;
+  padding: 0.65rem 0.85rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(14, 14, 14, 0.92);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
 }
 
-.vault-upload-batch {
-  margin-bottom: 0.15rem;
+.vault-upload-chip__meta {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
-.vault-upload-batch__count {
+.vault-upload-chip__batch {
   font-weight: 650;
   color: var(--text);
 }
 
-.vault-upload-current-name {
-  font-size: 0.88rem;
+.vault-upload-chip__sep {
+  opacity: 0.7;
+}
+
+.vault-upload-chip__name {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
   font-weight: 600;
-  margin-top: 0.25rem;
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.vault-upload-eta {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  margin-top: 0.35rem;
+.vault-upload-chip__eta {
+  margin: 0.25rem 0 0;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.vault-upload-chip__bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+  margin-top: 0.55rem;
+}
+
+.vault-upload-chip__bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.35));
+  transition: width 0.12s ease;
 }
 
 .vault-action-backdrop {
@@ -1217,72 +1317,101 @@ button {
   word-break: break-word;
 }
 
-.vault-file-card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.55rem;
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.vault-file-preview {
-  display: block;
-  height: 130px;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  background: #0c0c0c;
+.vault-photo-item {
   position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
-.vault-file-tile-btn {
+.vault-photo-tile {
   appearance: none;
   border: none;
   padding: 0;
   margin: 0;
-  background: transparent;
   width: 100%;
+  display: block;
   cursor: pointer;
-  text-align: left;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #111;
+  aspect-ratio: 1;
+  position: relative;
 }
 
-.vault-file-tile-btn:focus-visible {
+.vault-photo-tile:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--focus);
-  border-radius: 10px;
+  box-shadow: 0 0 0 2px var(--focus);
 }
 
-.vault-type-pill {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  padding: 0.28rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.45);
-  color: var(--text);
-  pointer-events: none;
-  backdrop-filter: blur(10px);
+.vault-photo-tile__media {
+  width: 100%;
+  height: 100%;
 }
 
-.vault-type-pill.is-video {
-  border-color: rgba(251, 146, 60, 0.35);
-}
-
-.vault-type-pill.is-image {
-  border-color: rgba(255, 255, 255, 0.18);
-}
-
-.vault-file-preview img,
-.vault-file-preview video {
+.vault-photo-tile__media img,
+.vault-photo-tile__media video {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.vault-photo-tile__video-glyph {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+  opacity: 0.92;
+}
+
+.vault-photo-item__more {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  line-height: 1;
+  color: #fff;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.vault-photo-item:hover .vault-photo-item__more,
+.vault-photo-item:focus-within .vault-photo-item__more {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .vault-photo-item__more {
+    opacity: 0.55;
+  }
+}
+
+.vault-photo-item__more:hover {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.vault-photo-item__more:focus-visible {
+  opacity: 1;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus);
 }
 
 .vault-file-fallback {
@@ -1292,23 +1421,6 @@ button {
   justify-content: center;
   color: var(--text-faint);
   font-size: 0.8rem;
-}
-
-.vault-file-meta {
-  min-height: 2.7rem;
-}
-
-.vault-file-name {
-  font-size: 0.86rem;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.vault-file-sub {
-  font-size: 0.76rem;
-  color: var(--text-faint);
 }
 
 .vault-delete-btn {
@@ -1322,6 +1434,13 @@ button {
   padding: 1rem;
   text-align: center;
   color: var(--text-muted);
+}
+
+.vault-panel--gallery .vault-empty,
+.vault-panel--gallery .vault-loading {
+  border: none;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 1.5rem 0.75rem;
 }
 
 /* Full-screen media viewer */

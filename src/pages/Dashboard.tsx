@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
@@ -24,6 +24,39 @@ function formatFileSizeBytes(n: number | null | undefined): string {
   if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
   const gb = mb / 1024
   return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`
+}
+
+const GALLERY_COLS_KEY = 'vault-gallery-grid-cols'
+type GalleryCols = 1 | 2 | 3 | 4 | 5
+
+function loadGalleryCols(): GalleryCols {
+  try {
+    const raw = localStorage.getItem(GALLERY_COLS_KEY)
+    const n = raw ? parseInt(raw, 10) : 3
+    if (n === 1 || n === 2 || n === 3 || n === 4 || n === 5) return n
+  } catch {
+    /* ignore */
+  }
+  return 3
+}
+
+function GridColsIcon({ cols }: { cols: number }) {
+  const g = 20 / cols
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden className="vault-grid-cols__icon">
+      {Array.from({ length: cols }).map((_, i) => (
+        <rect
+          key={i}
+          x={i * g + 0.6}
+          y={2}
+          width={g - 1.2}
+          height={16}
+          rx="1.2"
+          fill="currentColor"
+        />
+      ))}
+    </svg>
+  )
 }
 
 export function Dashboard() {
@@ -92,6 +125,15 @@ export function Dashboard() {
     | 'images_first'
     | 'videos_first'
   const [fileSort, setFileSort] = useState<FileSort>('newest')
+  const [galleryCols, setGalleryCols] = useState<GalleryCols>(loadGalleryCols)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(GALLERY_COLS_KEY, String(galleryCols))
+    } catch {
+      /* ignore */
+    }
+  }, [galleryCols])
 
   const setBusy = useCallback((id: string, on: boolean) => {
     setBusyIds((prev) => {
@@ -453,49 +495,56 @@ export function Dashboard() {
             )}
           </>
         ) : (
-          <section className="vault-panel vault-panel--detail">
-            <div className="vault-panel__header vault-panel__header--detail">
+          <section className="vault-panel vault-panel--detail vault-panel--gallery">
+            <div className="vault-gallery-toolbar">
               <button
                 type="button"
-                className="btn btn--ghost vault-back-btn"
+                className="btn btn--ghost vault-gallery-toolbar__back"
                 onClick={() => setOpenAlbumId(null)}
               >
                 ← All albums
               </button>
-              <div>
-                <h2 className="vault-panel__title">{openAlbum.name}</h2>
-                <p className="vault-panel__subtitle">
+              <div className="vault-gallery-toolbar__title">
+                <h2 className="vault-gallery-toolbar__name">{openAlbum.name}</h2>
+                <span className="vault-gallery-toolbar__count" aria-label="Item count">
                   {files.length === 0
-                    ? 'No files yet'
+                    ? 'Empty'
                     : files.length === 1
                       ? '1 item'
                       : `${files.length} items`}
-                </p>
+                </span>
               </div>
-              <div className="vault-panel__header-actions">
-                <label className="vault-file-sort-label">
-                  <span className="vault-file-sort-label__text">Sort</span>
-                  <select
-                    className="vault-sort-select vault-sort-select--files"
-                    value={fileSort}
-                    onChange={(e) => setFileSort(e.target.value as FileSort)}
-                    aria-label="Sort files in album"
-                  >
-                    <option value="newest">Newest</option>
-                    <option value="oldest">Oldest</option>
-                    <option value="largest">Largest</option>
-                    <option value="smallest">Smallest</option>
-                    <option value="images_first">Images first</option>
-                    <option value="videos_first">Videos first</option>
-                  </select>
-                </label>
-              </div>
-            </div>
-
-            <div className="vault-controls">
-              <label className="btn btn--outline vault-upload-btn" aria-disabled={uploading || !openAlbum}>
-                Upload files
-                <input
+              <div className="vault-gallery-toolbar__actions">
+                <div className="vault-grid-cols" role="toolbar" aria-label="Columns in grid">
+                  {([1, 2, 3, 4, 5] as const).map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={`vault-grid-cols__btn ${galleryCols === n ? 'is-active' : ''}`}
+                      onClick={() => setGalleryCols(n)}
+                      aria-pressed={galleryCols === n}
+                      title={`${n} column${n === 1 ? '' : 's'}`}
+                    >
+                      <GridColsIcon cols={n} />
+                    </button>
+                  ))}
+                </div>
+                <select
+                  className="vault-sort-select vault-sort-select--files vault-sort-select--compact"
+                  value={fileSort}
+                  onChange={(e) => setFileSort(e.target.value as FileSort)}
+                  aria-label="Sort files in album"
+                >
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="largest">Largest</option>
+                  <option value="smallest">Smallest</option>
+                  <option value="images_first">Images first</option>
+                  <option value="videos_first">Videos first</option>
+                </select>
+                <label className="btn btn--outline vault-upload-btn vault-upload-btn--toolbar" aria-disabled={uploading || !openAlbum}>
+                  Upload
+                  <input
                   type="file"
                   accept="image/*,video/*"
                   multiple
@@ -662,51 +711,36 @@ export function Dashboard() {
                   }}
                 />
               </label>
+              </div>
             </div>
 
             {uploading ? (
-            <div className="modal-backdrop" role="presentation">
+            <div className="modal-backdrop vault-upload-overlay" role="presentation">
               <div
-                className="modal modal--enter"
+                className="vault-upload-chip modal--enter"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="upload-progress-title"
                 onClick={(ev) => ev.stopPropagation()}
               >
-                <h2 id="upload-progress-title" className="modal__title">
-                  Uploading files
-                </h2>
-                <p className="modal__body-text vault-upload-batch">
+                <p id="upload-progress-title" className="vault-upload-chip__meta">
                   {uploadBatchTotal > 0 ? (
-                    <span className="vault-upload-batch__count">
+                    <span className="vault-upload-chip__batch">
                       {uploadBatchIndex} of {uploadBatchTotal}
                     </span>
                   ) : null}
-                  {uploadBatchTotal > 0 ? ' · ' : null}
-                  {uploadProgress}%
+                  {uploadBatchTotal > 0 ? <span className="vault-upload-chip__sep"> · </span> : null}
+                  <span>{uploadProgress}%</span>
                 </p>
-                <p className="modal__body-text vault-upload-current-name" title={uploadFileName ?? undefined}>
+                <p className="vault-upload-chip__name" title={uploadFileName ?? undefined}>
                   {uploadFileName ?? 'File'}
                 </p>
-                {uploadEtaText ? (
-                  <p className="modal__body-text vault-upload-eta">{uploadEtaText}</p>
-                ) : null}
-                <div
-                  style={{
-                    height: 10,
-                    borderRadius: 999,
-                    background: 'var(--border)',
-                    overflow: 'hidden',
-                    marginTop: '0.75rem',
-                  }}
-                  aria-label="Upload progress"
-                >
+                {uploadEtaText ? <p className="vault-upload-chip__eta">{uploadEtaText}</p> : null}
+                <div className="vault-upload-chip__bar" aria-label="Upload progress">
                   <div
+                    className="vault-upload-chip__bar-fill"
                     style={{
-                      height: '100%',
                       width: `${uploadProgress}%`,
-                      background: 'linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,255,255,0.35))',
-                      transition: 'width 0.15s ease',
                     }}
                   />
                 </div>
@@ -725,74 +759,77 @@ export function Dashboard() {
             ) : files.length === 0 ? (
             <div className="vault-empty">No files in this album yet.</div>
             ) : (
-            <ul className="vault-grid vault-grid--gallery">
+            <ul
+              className="vault-grid vault-grid--gallery"
+              style={
+                {
+                  ['--vault-gallery-cols' as string]: String(galleryCols),
+                } as CSSProperties
+              }
+            >
               {displayFiles.map((f, i) => {
                 const isVideo = isVideoFileName(f.file_name)
 
                 return (
-                  <li key={f.id} className="vault-file-card">
-                    <div className="vault-file-card__top">
-                      <button
-                        type="button"
-                        className="vault-file-tile-btn"
-                        onClick={() => {
-                          setViewerFileId(f.id)
-                          setViewerIndex(i)
-                          setViewerOpen(true)
-                        }}
-                        onTouchStart={(e) => {
-                          const t = e.touches[0]
-                          longPressTouchStartRef.current = { x: t.clientX, y: t.clientY }
-                          longPressTimerRef.current = setTimeout(() => {
-                            setFileActionTarget(f)
-                            longPressTimerRef.current = null
-                          }, 520)
-                        }}
-                        onTouchMove={(e) => {
-                          const start = longPressTouchStartRef.current
-                          if (!start || !longPressTimerRef.current) return
-                          const t = e.touches[0]
-                          if (Math.hypot(t.clientX - start.x, t.clientY - start.y) > 14) {
-                            clearLongPress()
-                          }
-                        }}
-                        onTouchEnd={clearLongPress}
-                        onTouchCancel={clearLongPress}
-                        onContextMenu={(e) => {
-                          e.preventDefault()
+                  <li key={f.id} className="vault-photo-item">
+                    <button
+                      type="button"
+                      className="vault-photo-tile"
+                      onClick={() => {
+                        setViewerFileId(f.id)
+                        setViewerIndex(i)
+                        setViewerOpen(true)
+                      }}
+                      onTouchStart={(e) => {
+                        const t = e.touches[0]
+                        longPressTouchStartRef.current = { x: t.clientX, y: t.clientY }
+                        longPressTimerRef.current = setTimeout(() => {
                           setFileActionTarget(f)
-                        }}
-                        aria-label={`Open ${f.file_name}`}
-                      >
-                        <div className="vault-file-preview">
-                          <span className={`vault-type-pill ${isVideo ? 'is-video' : 'is-image'}`}>
-                            {isVideo ? 'Video' : 'Image'}
-                          </span>
-                          {isVideo ? (
-                            <video src={f.file_url} muted playsInline preload="metadata" />
-                          ) : (
-                            <img src={f.file_url} alt={f.file_name} loading="lazy" />
-                          )}
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        className="vault-file-more-btn"
-                        aria-label={`Actions for ${f.file_name}`}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setFileActionTarget(f)
-                        }}
-                      >
-                        ⋮
-                      </button>
-                    </div>
-                    <div className="vault-file-meta">
-                      <p className="vault-file-name" title={f.file_name}>
-                        {f.file_name}
-                      </p>
-                      <p className="vault-file-sub">{new Date(f.created_at).toLocaleString()}</p>
-                    </div>
+                          longPressTimerRef.current = null
+                        }, 520)
+                      }}
+                      onTouchMove={(e) => {
+                        const start = longPressTouchStartRef.current
+                        if (!start || !longPressTimerRef.current) return
+                        const t = e.touches[0]
+                        if (Math.hypot(t.clientX - start.x, t.clientY - start.y) > 14) {
+                          clearLongPress()
+                        }
+                      }}
+                      onTouchEnd={clearLongPress}
+                      onTouchCancel={clearLongPress}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        setFileActionTarget(f)
+                      }}
+                      aria-label={`Open ${f.file_name}`}
+                    >
+                      <div className="vault-photo-tile__media">
+                        {isVideo ? (
+                          <video src={f.file_url} muted playsInline preload="metadata" />
+                        ) : (
+                          <img src={f.file_url} alt="" loading="lazy" />
+                        )}
+                      </div>
+                      {isVideo ? (
+                        <span className="vault-photo-tile__video-glyph" aria-hidden title="Video">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5v14l11-7L8 5z" />
+                          </svg>
+                        </span>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      className="vault-photo-item__more"
+                      aria-label={`Actions for ${f.file_name}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setFileActionTarget(f)
+                      }}
+                    >
+                      ⋮
+                    </button>
                   </li>
                 )
               })}
