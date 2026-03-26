@@ -1,3 +1,9 @@
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+}
+
 import Busboy from 'busboy'
 import { uploadFile } from '../lib/r2Upload.js'
 import { requireAuthenticatedUser } from './_auth.js'
@@ -5,6 +11,15 @@ import { sendJson } from './_json.js'
 
 function isAllowedType(fileType) {
   return typeof fileType === 'string' && (fileType.startsWith('image/') || fileType.startsWith('video/'))
+}
+
+function jsonResponse(payload, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
 }
 
 function parseMultipartFallback(req) {
@@ -22,11 +37,12 @@ function parseMultipartFallback(req) {
       stream.on('data', (chunk) => chunks.push(chunk))
       stream.on('error', reject)
       stream.on('end', () => {
+        const buffer = Buffer.concat(chunks)
         filePart = {
-          buffer: Buffer.concat(chunks),
+          buffer,
           fileName: info.filename,
           fileType: info.mimeType,
-          size: Buffer.concat(chunks).length,
+          size: buffer.length,
         }
       })
     })
@@ -38,7 +54,7 @@ function parseMultipartFallback(req) {
 }
 
 async function parseUploadRequest(req) {
-  // Preferred path: Web Request API style
+  // Preferred parser path for runtimes exposing Request.formData()
   if (typeof req.formData === 'function') {
     const formData = await req.formData()
     const file = formData.get('file')
@@ -49,13 +65,14 @@ async function parseUploadRequest(req) {
       return { userId, album, file: null }
     }
 
-    const fileBuffer = Buffer.from(await file.arrayBuffer())
+    const arrayBuffer = await file.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
 
     return {
       userId,
       album,
       file: {
-        buffer: fileBuffer,
+        buffer,
         fileName: file.name,
         fileType: file.type,
         size: file.size,
@@ -63,7 +80,7 @@ async function parseUploadRequest(req) {
     }
   }
 
-  // Fallback for Node serverless req/res handlers
+  // Node req/res fallback (Vercel serverless function style)
   const { fields, filePart } = await parseMultipartFallback(req)
   return {
     userId: fields.userId,
@@ -72,9 +89,17 @@ async function parseUploadRequest(req) {
   }
 }
 
+function respond(req, res, payload, status = 200) {
+  if (res && typeof sendJson === 'function') {
+    sendJson(res, status, payload)
+    return null
+  }
+  return jsonResponse(payload, status)
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return sendJson(res, 405, { ok: false, error: 'Method not allowed' })
+    return respond(req, res, { ok: false, error: 'Method not allowed' }, 405)
   }
 
   try {
@@ -82,23 +107,23 @@ export default async function handler(req, res) {
     const { userId, album, file } = await parseUploadRequest(req)
 
     if (!file) {
-      return sendJson(res, 200, { ok: false, error: 'No file provided' })
+      return respond(req, res, { ok: false, error: 'No file' }, 400)
     }
 
     if (!userId || !album) {
-      return sendJson(res, 200, { ok: false, error: 'userId and album are required' })
+      return respond(req, res, { ok: false, error: 'userId and album are required' }, 400)
     }
 
     if (userId !== user.id) {
-      return sendJson(res, 200, { ok: false, error: 'User mismatch' })
+      return respond(req, res, { ok: false, error: 'User mismatch' }, 403)
     }
 
     if (!isAllowedType(file.fileType)) {
-      return sendJson(res, 200, { ok: false, error: 'Only image and video files are supported' })
+      return respond(req, res, { ok: false, error: 'Only image and video files are supported' }, 400)
     }
 
     if (!file.buffer || file.buffer.length === 0) {
-      return sendJson(res, 200, { ok: false, error: 'Uploaded file is empty' })
+      return respond(req, res, { ok: false, error: 'Uploaded file is empty' }, 400)
     }
 
     console.log('UPLOAD START', {
@@ -117,17 +142,17 @@ export default async function handler(req, res) {
 
     console.log('UPLOAD SUCCESS', { key: result.key, url: result.url })
 
-    return sendJson(res, 200, {
+    return respond(req, res, {
       ok: true,
       key: result.key,
       url: result.url,
       fileName: result.fileName,
     })
   } catch (error) {
-    console.error(error)
-    return sendJson(res, 200, {
+    console.error('UPLOAD ERROR', error)
+    return respond(req, res, {
       ok: false,
       error: error instanceof Error ? error.message : 'Upload failed',
-    })
+    }, 400)
   }
 }
