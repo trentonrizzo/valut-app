@@ -7,7 +7,7 @@ function isAllowedType(fileType) {
   return typeof fileType === 'string' && (fileType.startsWith('image/') || fileType.startsWith('video/'))
 }
 
-function parseMultipart(req) {
+function parseMultipartFallback(req) {
   return new Promise((resolve, reject) => {
     const bb = Busboy({ headers: req.headers })
     const fields = {}
@@ -17,16 +17,16 @@ function parseMultipart(req) {
       fields[name] = value
     })
 
-    bb.on('file', (name, stream, info) => {
+    bb.on('file', (_name, stream, info) => {
       const chunks = []
       stream.on('data', (chunk) => chunks.push(chunk))
       stream.on('error', reject)
       stream.on('end', () => {
         filePart = {
-          fieldName: name,
           buffer: Buffer.concat(chunks),
           fileName: info.filename,
           fileType: info.mimeType,
+          size: Buffer.concat(chunks).length,
         }
       })
     })
@@ -37,61 +37,97 @@ function parseMultipart(req) {
   })
 }
 
+async function parseUploadRequest(req) {
+  // Preferred path: Web Request API style
+  if (typeof req.formData === 'function') {
+    const formData = await req.formData()
+    const file = formData.get('file')
+    const userId = formData.get('userId')
+    const album = formData.get('album')
+
+    if (!file || typeof file === 'string') {
+      return { userId, album, file: null }
+    }
+
+    const fileBuffer = Buffer.from(await file.arrayBuffer())
+
+    return {
+      userId,
+      album,
+      file: {
+        buffer: fileBuffer,
+        fileName: file.name,
+        fileType: file.type,
+        size: file.size,
+      },
+    }
+  }
+
+  // Fallback for Node serverless req/res handlers
+  const { fields, filePart } = await parseMultipartFallback(req)
+  return {
+    userId: fields.userId,
+    album: fields.album,
+    file: filePart,
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return sendJson(res, 405, { error: 'Method not allowed' })
+    return sendJson(res, 405, { ok: false, error: 'Method not allowed' })
   }
 
   try {
-    const contentType = req.headers['content-type'] || ''
-    if (!String(contentType).toLowerCase().includes('multipart/form-data')) {
-      return sendJson(res, 400, { error: 'Content-Type must be multipart/form-data' })
+    const { user } = await requireAuthenticatedUser(req)
+    const { userId, album, file } = await parseUploadRequest(req)
+
+    if (!file) {
+      return sendJson(res, 200, { ok: false, error: 'No file provided' })
     }
 
-    const { user } = await requireAuthenticatedUser(req)
-    const { fields, filePart } = await parseMultipart(req)
-
-    const userId = fields.userId
-    const album = fields.album
-
-    console.info('[UPLOAD] start', {
-      userId,
-      album,
-      fileName: filePart?.fileName,
-      fileType: filePart?.fileType,
-      fileSize: filePart?.buffer?.length,
-    })
-
-    if (!filePart || !userId || !album) {
-      return sendJson(res, 400, { error: 'file, userId, and album are required' })
+    if (!userId || !album) {
+      return sendJson(res, 200, { ok: false, error: 'userId and album are required' })
     }
 
     if (userId !== user.id) {
-      return sendJson(res, 403, { error: 'User mismatch' })
+      return sendJson(res, 200, { ok: false, error: 'User mismatch' })
     }
 
-    if (!isAllowedType(filePart.fileType)) {
-      return sendJson(res, 400, { error: 'Only image and video files are supported' })
+    if (!isAllowedType(file.fileType)) {
+      return sendJson(res, 200, { ok: false, error: 'Only image and video files are supported' })
     }
 
-    if (!filePart.buffer || filePart.buffer.length === 0) {
-      return sendJson(res, 400, { error: 'Uploaded file is empty' })
+    if (!file.buffer || file.buffer.length === 0) {
+      return sendJson(res, 200, { ok: false, error: 'Uploaded file is empty' })
     }
 
-    const result = await uploadFile({
-      fileBuffer: filePart.buffer,
-      fileType: filePart.fileType,
-      userId: user.id,
-      album,
-      fileName: filePart.fileName,
+    console.log('UPLOAD START', {
+      name: file.fileName,
+      size: file.size ?? file.buffer.length,
+      type: file.fileType,
     })
 
-    console.info('[UPLOAD] success', { key: result.key, url: result.url })
+    const result = await uploadFile({
+      fileBuffer: file.buffer,
+      fileType: file.fileType,
+      userId: user.id,
+      album: String(album),
+      fileName: file.fileName,
+    })
 
-    return sendJson(res, 200, result)
+    console.log('UPLOAD SUCCESS', { key: result.key, url: result.url })
+
+    return sendJson(res, 200, {
+      ok: true,
+      key: result.key,
+      url: result.url,
+      fileName: result.fileName,
+    })
   } catch (error) {
-    console.error('UPLOAD ERROR:', error)
-    const status = error?.statusCode || 500
-    return sendJson(res, status, { error: error instanceof Error ? error.message : 'Upload failed' })
+    console.error(error)
+    return sendJson(res, 200, {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Upload failed',
+    })
   }
 }
