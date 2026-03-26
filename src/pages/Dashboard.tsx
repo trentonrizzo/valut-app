@@ -9,6 +9,7 @@ import { AlbumGrid } from '../components/albums/AlbumGrid'
 import { CreateAlbumModal } from '../components/albums/CreateAlbumModal'
 import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
+import { MediaViewer } from '../components/files/MediaViewer'
 
 export function Dashboard() {
   const { user, signOut } = useAuth()
@@ -42,6 +43,9 @@ export function Dashboard() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadFileName, setUploadFileName] = useState<string | null>(null)
 
+  const [viewerOpen, setViewerOpen] = useState(false)
+  const [viewerIndex, setViewerIndex] = useState(0)
+
   const setBusy = useCallback((id: string, on: boolean) => {
     setBusyIds((prev) => {
       const next = new Set(prev)
@@ -69,6 +73,24 @@ export function Dashboard() {
     () => albums.find((a) => a.id === openAlbumId) ?? null,
     [albums, openAlbumId],
   )
+
+  const mediaFiles = useMemo(
+    () => files.map((f) => ({ id: f.id, file_url: f.file_url, file_name: f.file_name, created_at: f.created_at })),
+    [files],
+  )
+
+  useEffect(() => {
+    setViewerOpen(false)
+    setViewerIndex(0)
+  }, [openAlbumId])
+
+  useEffect(() => {
+    if (!viewerOpen) return
+    setViewerIndex((prev) => {
+      const max = Math.max(0, mediaFiles.length - 1)
+      return Math.max(0, Math.min(prev, max))
+    })
+  }, [viewerOpen, mediaFiles.length])
 
   useEffect(() => {
     if (!user) return
@@ -463,19 +485,32 @@ Upload files
             <div className="vault-empty">No files in this album yet.</div>
           ) : (
             <ul className="vault-grid">
-              {files.map((f) => {
+              {files.map((f, i) => {
                 const lower = f.file_name.toLowerCase()
                 const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(lower)
 
                 return (
                   <li key={f.id} className="vault-file-card">
-                    <a href={f.file_url} target="_blank" rel="noreferrer" className="vault-file-preview">
-                      {isVideo ? (
-                        <video src={f.file_url} muted playsInline preload="metadata" />
-                      ) : (
-                        <img src={f.file_url} alt={f.file_name} loading="lazy" />
-                      )}
-                    </a>
+                    <button
+                      type="button"
+                      className="vault-file-tile-btn"
+                      onClick={() => {
+                        setViewerIndex(i)
+                        setViewerOpen(true)
+                      }}
+                      aria-label={`Open ${f.file_name}`}
+                    >
+                      <div className="vault-file-preview">
+                        <span className={`vault-type-pill ${isVideo ? 'is-video' : 'is-image'}`}>
+                          {isVideo ? 'Video' : 'Image'}
+                        </span>
+                        {isVideo ? (
+                          <video src={f.file_url} muted playsInline preload="metadata" />
+                        ) : (
+                          <img src={f.file_url} alt={f.file_name} loading="lazy" />
+                        )}
+                      </div>
+                    </button>
                     <div className="vault-file-meta">
                       <p className="vault-file-name" title={f.file_name}>
                         {f.file_name}
@@ -487,6 +522,15 @@ Upload files
               })}
             </ul>
           )}
+
+          <MediaViewer
+            key={viewerOpen ? mediaFiles[viewerIndex]?.id ?? 'viewer' : 'viewer'}
+            open={viewerOpen}
+            files={mediaFiles}
+            index={viewerIndex}
+            onClose={() => setViewerOpen(false)}
+            onIndexChange={(nextIndex) => setViewerIndex(nextIndex)}
+          />
         </section>
       </main>
 
