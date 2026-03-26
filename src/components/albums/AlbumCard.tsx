@@ -26,15 +26,31 @@ function formatItemCount(n: number): string {
 type Props = {
   album: AlbumWithMeta
   busy?: boolean
+  active?: boolean
+  onOpen: (album: AlbumWithMeta) => void
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
 }
 
-export function AlbumCard({ album, busy, onRename, onDelete }: Props) {
+export function AlbumCard({ album, busy, active, onOpen, onRename, onDelete }: Props) {
   const created = formatAlbumDate(album.created_at)
 
   return (
-    <article className={`album-card album-card--interactive ${busy ? 'album-card--busy' : ''}`}>
+    <article
+      className={`album-card album-card--interactive ${busy ? 'album-card--busy' : ''} ${active ? 'album-card--active' : ''}`}
+      onClick={() => {
+        if (!busy) onOpen(album)
+      }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (!busy && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault()
+          onOpen(album)
+        }
+      }}
+      aria-label={`Open album ${album.name}`}
+    >
       <div className="album-card__thumb">
         <div className="album-card__thumb-inner" aria-hidden>
           <svg viewBox="0 0 48 48" className="album-card__icon">

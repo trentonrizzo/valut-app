@@ -455,6 +455,14 @@ button {
     0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
+
+.album-card--active {
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
 .album-card--interactive:active:not(.album-card--busy) {
   transform: translateY(-1px) scale(1.005);
   transition-duration: 0.08s;

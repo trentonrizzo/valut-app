@@ -1,5 +1,7 @@
 export type VaultFile = {
-  key: string
-  size: number
-  lastModified: string | null
+  id: string
+  album_id: string
+  type: string
+  url: string
+  created_at: string
 }

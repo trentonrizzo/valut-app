@@ -4,6 +4,8 @@ import { AlbumCard } from './AlbumCard'
 type Props = {
   albums: AlbumWithMeta[]
   busyAlbumIds: ReadonlySet<string>
+  activeAlbumId: string | null
+  onOpen: (album: AlbumWithMeta) => void
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
   onCreateClick: () => void
@@ -12,6 +14,8 @@ type Props = {
 export function AlbumGrid({
   albums,
   busyAlbumIds,
+  activeAlbumId,
+  onOpen,
   onRename,
   onDelete,
   onCreateClick,
@@ -61,6 +65,8 @@ export function AlbumGrid({
           <AlbumCard
             album={album}
             busy={busyAlbumIds.has(album.id)}
+            active={activeAlbumId === album.id}
+            onOpen={onOpen}
             onRename={onRename}
             onDelete={onDelete}
           />
