@@ -67,3 +67,36 @@ In the Vercel project settings, use the **Vite** preset (or set **Output Directo
 | `/login` | Email/password sign-in |
 | `/register` | Sign up |
 | `/dashboard` | Albums (protected) |
+
+
+## Cloudflare R2 integration
+
+This project uses Vercel serverless handlers in `api/` as the secure backend layer for R2.
+
+Server routes:
+
+- `POST /api/upload` → `api/upload.js`
+- `POST /api/delete` → `api/delete.js`
+- `GET|POST /api/list` → `api/list.js`
+
+Core storage modules:
+
+- `lib/r2Client.js`
+- `lib/r2Upload.js`
+- `lib/r2Delete.js`
+- `lib/r2List.js`
+- `lib/vaultApi.js` (frontend fetch helper)
+
+R2 object key format:
+
+- `userId/albums/albumSlug/timestamp-randomized-originalFileName`
+
+Required server env vars:
+
+- `R2_BUCKET_NAME`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_ENDPOINT`
+- `R2_PUBLIC_URL`
+
+`vercel.json` excludes `/api/*` from SPA rewrite so API endpoints and React Router both work in deployment.

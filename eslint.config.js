@@ -29,5 +29,25 @@ export default defineConfig([
         ],
       },
     },
+    {
+      files: ['api/**/*.js', 'lib/r2*.js'],
+      languageOptions: {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        globals: {
+          ...globals.node,
+        },
+      },
+    },
+    {
+      files: ['lib/vaultApi.js'],
+      languageOptions: {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        globals: {
+          ...globals.browser,
+        },
+      },
+    },
   ),
 ])
