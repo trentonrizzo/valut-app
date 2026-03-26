@@ -43,6 +43,7 @@ export function Dashboard() {
   const [creatingAlbum, setCreatingAlbum] = useState(false)
 
   const [openAlbumId, setOpenAlbumId] = useState<string | null>(null)
+  const [files, setFiles] = useState<Array<{ id: string; file_url: string }>>([])
   const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([])
   const [vaultLoading, setVaultLoading] = useState(false)
   const [vaultError, setVaultError] = useState<string | null>(null)
@@ -51,6 +52,7 @@ export function Dashboard() {
   const [deletingFile, setDeletingFile] = useState(false)
 
   const accessToken = session?.access_token ?? ''
+  const albumId = openAlbumId
 
   const setBusy = useCallback((id: string, on: boolean) => {
     setBusyIds((prev) => {
@@ -136,6 +138,16 @@ export function Dashboard() {
   useEffect(() => {
     void refreshAlbumFiles()
   }, [refreshAlbumFiles])
+
+  useEffect(() => {
+    if (!albumId) return
+
+    supabase
+      .from('files')
+      .select('*')
+      .eq('album_id', albumId)
+      .then(({ data }) => setFiles((data as Array<{ id: string; file_url: string }>) || []))
+  }, [albumId])
 
   async function handleCreateAlbum(name: string) {
     if (!user) throw new Error('Not signed in.')
@@ -227,28 +239,30 @@ export function Dashboard() {
     }
   }
 
-  async function handleUpload(file: File) {
+  async function handleUpload(file: File, albumId: string) {
     if (!file) return
 
-    const fileName = `${Date.now()}-${file.name}`
+    const res = await fetch('/api/r2-upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name }),
+    })
 
-    const { error } = await supabase.storage
-      .from('vault')
-      .upload(fileName, file)
+    const { uploadUrl, fileUrl } = await res.json()
 
-    if (error) {
-      alert('Upload failed')
-      console.error(error)
-      return
-    }
+    await fetch(uploadUrl, {
+      method: 'PUT',
+      body: file,
+      headers: { 'Content-Type': file.type },
+    })
 
-    const { data: urlData } = supabase.storage
-      .from('vault')
-      .getPublicUrl(fileName)
+    await supabase.from('files').insert({
+      file_name: file.name,
+      file_url: fileUrl,
+      album_id: albumId,
+    })
 
-    alert('UPLOAD SUCCESS')
-
-    console.log('File URL:', urlData.publicUrl)
+    alert('UPLOAD COMPLETE')
   }
 
   async function handleDeleteFileConfirm() {
@@ -370,8 +384,8 @@ Upload files
                 onChange={(e) => {
                   console.log("UPLOAD CLICKED")
                   const file = e.target.files?.[0]
-                  if (file) {
-                    void handleUpload(file)
+                  if (file && openAlbum) {
+                    void handleUpload(file, openAlbum.id)
                   }
                   e.currentTarget.value = ''
                 }}
@@ -422,6 +436,10 @@ Upload files
               ))}
             </ul>
           )}
+
+          {files.map((f) => (
+            <img key={f.id} src={f.file_url} style={{ width: '100%' }} />
+          ))}
         </section>
       </main>
 
