@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
@@ -10,6 +10,21 @@ import { CreateAlbumModal } from '../components/albums/CreateAlbumModal'
 import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
 import { MediaViewer } from '../components/files/MediaViewer'
+
+function isVideoFileName(name: string) {
+  return /\.(mp4|webm|ogg|mov|mkv)$/i.test(String(name || '').toLowerCase())
+}
+
+function formatFileSizeBytes(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n < 0) return '—'
+  if (n < 1024) return `${Math.round(n)} B`
+  const kb = n / 1024
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`
+  const mb = kb / 1024
+  if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
+  const gb = mb / 1024
+  return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`
+}
 
 export function Dashboard() {
   const { user, signOut } = useAuth()
@@ -33,6 +48,7 @@ export function Dashboard() {
     file_name: string
     file_url: string
     created_at: string
+    file_size_bytes?: number | null
   }
 
   const [files, setFiles] = useState<FileRow[]>([])
@@ -42,12 +58,40 @@ export function Dashboard() {
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadFileName, setUploadFileName] = useState<string | null>(null)
+  const [uploadBatchIndex, setUploadBatchIndex] = useState(0)
+  const [uploadBatchTotal, setUploadBatchTotal] = useState(0)
+  const [uploadEtaText, setUploadEtaText] = useState<string | null>(null)
+  const uploadStartMsRef = useRef(0)
+  const uploadTotalBytesRef = useRef(0)
 
   const [viewerOpen, setViewerOpen] = useState(false)
   const [viewerIndex, setViewerIndex] = useState(0)
+  const [viewerFileId, setViewerFileId] = useState<string | null>(null)
+
+  const [fileActionTarget, setFileActionTarget] = useState<FileRow | null>(null)
+  const [fileInfoTarget, setFileInfoTarget] = useState<FileRow | null>(null)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const longPressTouchStartRef = useRef<{ x: number; y: number } | null>(null)
+
+  const clearLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
+    }
+    longPressTouchStartRef.current = null
+  }, [])
 
   type AlbumSort = 'newest' | 'oldest' | 'az' | 'za'
   const [albumSort, setAlbumSort] = useState<AlbumSort>('newest')
+
+  type FileSort =
+    | 'newest'
+    | 'oldest'
+    | 'largest'
+    | 'smallest'
+    | 'images_first'
+    | 'videos_first'
+  const [fileSort, setFileSort] = useState<FileSort>('newest')
 
   const setBusy = useCallback((id: string, on: boolean) => {
     setBusyIds((prev) => {
@@ -96,15 +140,81 @@ export function Dashboard() {
     return albums.find((a) => a.id === openAlbumId) ?? null
   }, [albums, openAlbumId])
 
+  const displayFiles = useMemo(() => {
+    const list = [...files]
+    const byDateDesc = (a: FileRow, b: FileRow) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    const byDateAsc = (a: FileRow, b: FileRow) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+
+    switch (fileSort) {
+      case 'newest':
+        return list.sort(byDateDesc)
+      case 'oldest':
+        return list.sort(byDateAsc)
+      case 'largest':
+        return list.sort((a, b) => {
+          const sa = a.file_size_bytes
+          const sb = b.file_size_bytes
+          if (sa == null && sb == null) return byDateDesc(a, b)
+          if (sa == null) return 1
+          if (sb == null) return -1
+          if (sb !== sa) return sb - sa
+          return byDateDesc(a, b)
+        })
+      case 'smallest':
+        return list.sort((a, b) => {
+          const sa = a.file_size_bytes
+          const sb = b.file_size_bytes
+          if (sa == null && sb == null) return byDateDesc(a, b)
+          if (sa == null) return 1
+          if (sb == null) return -1
+          if (sa !== sb) return sa - sb
+          return byDateDesc(a, b)
+        })
+      case 'images_first':
+        return list.sort((a, b) => {
+          const va = isVideoFileName(a.file_name)
+          const vb = isVideoFileName(b.file_name)
+          if (va !== vb) return va ? 1 : -1
+          return byDateDesc(a, b)
+        })
+      case 'videos_first':
+        return list.sort((a, b) => {
+          const va = isVideoFileName(a.file_name)
+          const vb = isVideoFileName(b.file_name)
+          if (va !== vb) return va ? -1 : 1
+          return byDateDesc(a, b)
+        })
+      default:
+        return list.sort(byDateDesc)
+    }
+  }, [files, fileSort])
+
   const mediaFiles = useMemo(
-    () => files.map((f) => ({ id: f.id, file_url: f.file_url, file_name: f.file_name, created_at: f.created_at })),
-    [files],
+    () =>
+      displayFiles.map((f) => ({
+        id: f.id,
+        file_url: f.file_url,
+        file_name: f.file_name,
+        created_at: f.created_at,
+        file_size_bytes: f.file_size_bytes,
+      })),
+    [displayFiles],
   )
 
   useEffect(() => {
     setViewerOpen(false)
     setViewerIndex(0)
+    setViewerFileId(null)
+    setFileSort('newest')
   }, [openAlbumId])
+
+  useEffect(() => {
+    if (!viewerOpen || !viewerFileId) return
+    const ni = displayFiles.findIndex((f) => f.id === viewerFileId)
+    if (ni >= 0) setViewerIndex(ni)
+  }, [displayFiles, viewerOpen, viewerFileId])
 
   useEffect(() => {
     if (!viewerOpen) return
@@ -363,16 +473,22 @@ export function Dashboard() {
                 </p>
               </div>
               <div className="vault-panel__header-actions">
-                <select
-                  className="vault-sort-select"
-                  value={albumSort}
-                  onChange={(e) => setAlbumSort(e.target.value as AlbumSort)}
-                >
-                  <option value="newest">Newest</option>
-                  <option value="oldest">Oldest</option>
-                  <option value="az">A–Z</option>
-                  <option value="za">Z–A</option>
-                </select>
+                <label className="vault-file-sort-label">
+                  <span className="vault-file-sort-label__text">Sort</span>
+                  <select
+                    className="vault-sort-select vault-sort-select--files"
+                    value={fileSort}
+                    onChange={(e) => setFileSort(e.target.value as FileSort)}
+                    aria-label="Sort files in album"
+                  >
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                    <option value="largest">Largest</option>
+                    <option value="smallest">Smallest</option>
+                    <option value="images_first">Images first</option>
+                    <option value="videos_first">Videos first</option>
+                  </select>
+                </label>
               </div>
             </div>
 
@@ -398,15 +514,23 @@ export function Dashboard() {
                         setUploading(true)
                         setUploadProgress(0)
                         setUploadFileName(filesArray[0].name)
+                        setUploadBatchTotal(filesArray.length)
+                        setUploadBatchIndex(1)
+                        setUploadEtaText(null)
+                        const totalBytes = filesArray.reduce((s, f) => s + f.size, 0)
+                        uploadTotalBytesRef.current = totalBytes
+                        uploadStartMsRef.current = Date.now()
 
                         const total = filesArray.length
                         let index = 0
+                        let completedBytes = 0
                         const failed: string[] = []
 
                         try {
                           for (const file of filesArray) {
                             index += 1
                             setUploadFileName(file.name)
+                            setUploadBatchIndex(index)
 
                             try {
                               const presignRes = await fetch('/api/r2-upload-url', {
@@ -437,11 +561,29 @@ export function Dashboard() {
                                 xhr.setRequestHeader('Content-Type', 'application/octet-stream')
 
                                 xhr.upload.onprogress = (event) => {
-                                  if (!event.lengthComputable) return
-                                  const percent = Math.round((event.loaded / event.total) * 100)
-                                  const overall =
-                                    ((index - 1) / total) * 100 + (percent / total)
-                                  setUploadProgress(Math.min(100, Math.round(overall)))
+                                  if (!event.lengthComputable || totalBytes <= 0) return
+                                  const currentFileBytes = (event.loaded / event.total) * file.size
+                                  const totalDone = completedBytes + currentFileBytes
+                                  const overallPct = Math.round((totalDone / totalBytes) * 100)
+                                  setUploadProgress(Math.min(100, overallPct))
+
+                                  const elapsed = Date.now() - uploadStartMsRef.current
+                                  if (elapsed > 2500 && overallPct > 2 && overallPct < 99) {
+                                    const rate = totalDone / elapsed
+                                    if (rate > 0) {
+                                      const remainingMs = (totalBytes - totalDone) / rate
+                                      if (remainingMs > 4000 && remainingMs < 1000 * 60 * 60 * 4) {
+                                        const sec = Math.ceil(remainingMs / 1000)
+                                        setUploadEtaText(
+                                          sec < 60 ? `~${sec}s left` : `~${Math.round(sec / 60)}m left`,
+                                        )
+                                      } else {
+                                        setUploadEtaText(null)
+                                      }
+                                    }
+                                  } else if (elapsed <= 2500) {
+                                    setUploadEtaText(null)
+                                  }
                                 }
 
                                 xhr.onload = () => {
@@ -457,11 +599,14 @@ export function Dashboard() {
                                 xhr.send(file)
                               })
 
+                              completedBytes += file.size
+
                               const { error: insertError } = await supabase.from('files').insert({
                                 user_id: user.id,
                                 album_id: openAlbum.id,
                                 file_name: file.name,
                                 file_url: fileUrl,
+                                file_size_bytes: file.size,
                               })
 
                               if (insertError) throw new Error(insertError.message)
@@ -507,6 +652,9 @@ export function Dashboard() {
                           setUploading(false)
                           setUploadProgress(0)
                           setUploadFileName(null)
+                          setUploadBatchIndex(0)
+                          setUploadBatchTotal(0)
+                          setUploadEtaText(null)
                         }
                       })()
                     }
@@ -528,9 +676,21 @@ export function Dashboard() {
                 <h2 id="upload-progress-title" className="modal__title">
                   Uploading files
                 </h2>
-                <p className="modal__body-text">
-                  {uploadFileName ?? 'File'} · {uploadProgress}%
+                <p className="modal__body-text vault-upload-batch">
+                  {uploadBatchTotal > 0 ? (
+                    <span className="vault-upload-batch__count">
+                      {uploadBatchIndex} of {uploadBatchTotal}
+                    </span>
+                  ) : null}
+                  {uploadBatchTotal > 0 ? ' · ' : null}
+                  {uploadProgress}%
                 </p>
+                <p className="modal__body-text vault-upload-current-name" title={uploadFileName ?? undefined}>
+                  {uploadFileName ?? 'File'}
+                </p>
+                {uploadEtaText ? (
+                  <p className="modal__body-text vault-upload-eta">{uploadEtaText}</p>
+                ) : null}
                 <div
                   style={{
                     height: 10,
@@ -550,9 +710,6 @@ export function Dashboard() {
                     }}
                   />
                 </div>
-                <p className="modal__body-text" style={{ marginTop: '0.6rem' }}>
-                  {uploadProgress}%
-                </p>
               </div>
             </div>
             ) : null}
@@ -568,33 +725,68 @@ export function Dashboard() {
             ) : files.length === 0 ? (
             <div className="vault-empty">No files in this album yet.</div>
             ) : (
-            <ul className="vault-grid">
-              {files.map((f, i) => {
-                const lower = f.file_name.toLowerCase()
-                const isVideo = /\.(mp4|webm|ogg|mov|mkv)$/i.test(lower)
+            <ul className="vault-grid vault-grid--gallery">
+              {displayFiles.map((f, i) => {
+                const isVideo = isVideoFileName(f.file_name)
 
                 return (
                   <li key={f.id} className="vault-file-card">
-                    <button
-                      type="button"
-                      className="vault-file-tile-btn"
-                      onClick={() => {
-                        setViewerIndex(i)
-                        setViewerOpen(true)
-                      }}
-                      aria-label={`Open ${f.file_name}`}
-                    >
-                      <div className="vault-file-preview">
-                        <span className={`vault-type-pill ${isVideo ? 'is-video' : 'is-image'}`}>
-                          {isVideo ? 'Video' : 'Image'}
-                        </span>
-                        {isVideo ? (
-                          <video src={f.file_url} muted playsInline preload="metadata" />
-                        ) : (
-                          <img src={f.file_url} alt={f.file_name} loading="lazy" />
-                        )}
-                      </div>
-                    </button>
+                    <div className="vault-file-card__top">
+                      <button
+                        type="button"
+                        className="vault-file-tile-btn"
+                        onClick={() => {
+                          setViewerFileId(f.id)
+                          setViewerIndex(i)
+                          setViewerOpen(true)
+                        }}
+                        onTouchStart={(e) => {
+                          const t = e.touches[0]
+                          longPressTouchStartRef.current = { x: t.clientX, y: t.clientY }
+                          longPressTimerRef.current = setTimeout(() => {
+                            setFileActionTarget(f)
+                            longPressTimerRef.current = null
+                          }, 520)
+                        }}
+                        onTouchMove={(e) => {
+                          const start = longPressTouchStartRef.current
+                          if (!start || !longPressTimerRef.current) return
+                          const t = e.touches[0]
+                          if (Math.hypot(t.clientX - start.x, t.clientY - start.y) > 14) {
+                            clearLongPress()
+                          }
+                        }}
+                        onTouchEnd={clearLongPress}
+                        onTouchCancel={clearLongPress}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          setFileActionTarget(f)
+                        }}
+                        aria-label={`Open ${f.file_name}`}
+                      >
+                        <div className="vault-file-preview">
+                          <span className={`vault-type-pill ${isVideo ? 'is-video' : 'is-image'}`}>
+                            {isVideo ? 'Video' : 'Image'}
+                          </span>
+                          {isVideo ? (
+                            <video src={f.file_url} muted playsInline preload="metadata" />
+                          ) : (
+                            <img src={f.file_url} alt={f.file_name} loading="lazy" />
+                          )}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        className="vault-file-more-btn"
+                        aria-label={`Actions for ${f.file_name}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setFileActionTarget(f)
+                        }}
+                      >
+                        ⋮
+                      </button>
+                    </div>
                     <div className="vault-file-meta">
                       <p className="vault-file-name" title={f.file_name}>
                         {f.file_name}
@@ -607,13 +799,124 @@ export function Dashboard() {
             </ul>
             )}
 
+            {fileActionTarget ? (
+              <div
+                className="modal-backdrop vault-action-backdrop"
+                role="presentation"
+                onClick={() => setFileActionTarget(null)}
+              >
+                <div
+                  className="vault-action-sheet modal modal--enter"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="vault-file-actions-title"
+                  onClick={(ev) => ev.stopPropagation()}
+                >
+                  <h2 id="vault-file-actions-title" className="vault-action-sheet__title">
+                    {fileActionTarget.file_name}
+                  </h2>
+                  <div className="vault-action-sheet__list">
+                    <a
+                      className="vault-action-sheet__item"
+                      href={fileActionTarget.file_url}
+                      download={fileActionTarget.file_name}
+                      onClick={() => setFileActionTarget(null)}
+                    >
+                      Download
+                    </a>
+                    <button
+                      type="button"
+                      className="vault-action-sheet__item"
+                      onClick={async () => {
+                        const url = fileActionTarget.file_url
+                        try {
+                          await navigator.clipboard.writeText(url)
+                          showToast('Link copied')
+                        } catch {
+                          showToast('Could not copy link', 'error')
+                        }
+                        setFileActionTarget(null)
+                      }}
+                    >
+                      Copy link
+                    </button>
+                    <button
+                      type="button"
+                      className="vault-action-sheet__item"
+                      onClick={() => {
+                        setFileInfoTarget(fileActionTarget)
+                        setFileActionTarget(null)
+                      }}
+                    >
+                      File details
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn--ghost vault-action-sheet__cancel"
+                    onClick={() => setFileActionTarget(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {fileInfoTarget ? (
+              <div
+                className="modal-backdrop"
+                role="presentation"
+                onClick={() => setFileInfoTarget(null)}
+              >
+                <div
+                  className="modal modal--enter"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="vault-file-info-title"
+                  onClick={(ev) => ev.stopPropagation()}
+                >
+                  <h2 id="vault-file-info-title" className="modal__title">
+                    File details
+                  </h2>
+                  <dl className="vault-file-info-dl">
+                    <div>
+                      <dt>Name</dt>
+                      <dd title={fileInfoTarget.file_name}>{fileInfoTarget.file_name}</dd>
+                    </div>
+                    <div>
+                      <dt>Date</dt>
+                      <dd>{new Date(fileInfoTarget.created_at).toLocaleString()}</dd>
+                    </div>
+                    <div>
+                      <dt>Type</dt>
+                      <dd>{isVideoFileName(fileInfoTarget.file_name) ? 'Video' : 'Image'}</dd>
+                    </div>
+                    <div>
+                      <dt>Size</dt>
+                      <dd>{formatFileSizeBytes(fileInfoTarget.file_size_bytes ?? undefined)}</dd>
+                    </div>
+                  </dl>
+                  <button type="button" className="btn btn--primary" onClick={() => setFileInfoTarget(null)}>
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <MediaViewer
-              key={viewerOpen ? mediaFiles[viewerIndex]?.id ?? 'viewer' : 'viewer'}
+              key={viewerOpen ? 'viewer-open' : 'viewer-closed'}
               open={viewerOpen}
               files={mediaFiles}
               index={viewerIndex}
-              onClose={() => setViewerOpen(false)}
-              onIndexChange={(nextIndex) => setViewerIndex(nextIndex)}
+              onClose={() => {
+                setViewerOpen(false)
+                setViewerFileId(null)
+              }}
+              onIndexChange={(nextIndex) => {
+                setViewerIndex(nextIndex)
+                const nf = displayFiles[nextIndex]
+                if (nf) setViewerFileId(nf.id)
+              }}
             />
           </section>
         )}

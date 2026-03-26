@@ -5,6 +5,7 @@ export type MediaFile = {
   file_url: string
   file_name: string
   created_at: string
+  file_size_bytes?: number | null
 }
 
 type Props = {
@@ -32,6 +33,7 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   const [playbackRate, setPlaybackRate] = useState(1)
+  const [videoLoop, setVideoLoop] = useState(false)
 
   // Image zoom/pan state (only used for images)
   const [scale, setScale] = useState(1)
@@ -208,8 +210,21 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
     const absX = Math.abs(dx)
     const absY = Math.abs(dy)
 
-    // Horizontal swipe threshold
-    if (absX > 70 && absX > absY && (isVideo || !pinchingRef.current)) {
+    // Swipe / drag down to close (vertical gesture wins)
+    const dismissDy = 72
+    if (
+      (isVideo || (scale <= 1.0001 && !pinchingRef.current)) &&
+      dy > dismissDy &&
+      absY > absX * 1.05
+    ) {
+      onClose()
+      resetDrag()
+      return
+    }
+
+    // Horizontal swipe — prev/next
+    const hThreshold = 48
+    if (absX > hThreshold && absX > absY && (isVideo || !pinchingRef.current)) {
       if (dx < 0) goNext()
       else goPrev()
     }
@@ -229,7 +244,7 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
 
   return (
     <div
-      className="media-viewer-backdrop"
+      className="media-viewer-backdrop media-viewer-backdrop--open"
       role="presentation"
       onClick={onClose}
       aria-label="Media viewer"
@@ -255,6 +270,15 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
                     {r}x
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className={`media-viewer__speed-btn ${videoLoop ? 'is-active' : ''}`}
+                  onClick={() => setVideoLoop((v) => !v)}
+                  aria-pressed={videoLoop}
+                  title="Loop video"
+                >
+                  Loop
+                </button>
               </div>
             ) : null}
 
@@ -297,6 +321,10 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onPointerCancel={(e) => {
+              pointerMap.current.delete(e.pointerId)
+              resetDrag()
+            }}
             onDoubleClick={onDoubleClick}
           >
             {isVideo ? (
@@ -307,6 +335,7 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
                 src={file.file_url}
                 controls
                 autoPlay
+                loop={videoLoop}
                 playsInline
                 preload="metadata"
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }}
