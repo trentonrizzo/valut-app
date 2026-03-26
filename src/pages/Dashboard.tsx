@@ -242,7 +242,7 @@ export function Dashboard() {
   async function handleUpload(file: File, albumId: string) {
     if (!file) return
 
-    const res = await fetch('/api/r2-upload-url', {
+    const res = await fetch("/api/r2-upload-url", {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fileName: file.name }),
@@ -261,6 +261,13 @@ export function Dashboard() {
       file_url: fileUrl,
       album_id: albumId,
     })
+
+    const { data } = await supabase
+      .from('files')
+      .select('*')
+      .eq('album_id', albumId)
+
+    setFiles((data as Array<{ id: string; file_url: string }>) || [])
 
     alert('UPLOAD COMPLETE')
   }
