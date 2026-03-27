@@ -1,5 +1,6 @@
 import type { MutableRefObject } from 'react'
 import { supabase } from './supabase'
+import { encryptFile, ensureEncryptionKey } from './vaultCrypto'
 
 export type BatchUploadProgress = {
   progress: number
@@ -32,8 +33,8 @@ async function presignUpload(fileName: string): Promise<{ uploadUrl: string; fil
   return presign as { uploadUrl: string; fileUrl: string }
 }
 
-async function putFileToR2(
-  file: File,
+async function putBlobToR2(
+  body: Blob,
   uploadUrl: string,
   totalBytes: number,
   completedBytes: number,
@@ -41,6 +42,7 @@ async function putFileToR2(
   total: number,
   refs: Refs,
   onProgress: (p: BatchUploadProgress) => void,
+  fileName: string,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
@@ -49,8 +51,7 @@ async function putFileToR2(
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || totalBytes <= 0) return
-      const currentFileBytes = (event.loaded / event.total) * file.size
-      const totalDone = completedBytes + currentFileBytes
+      const totalDone = completedBytes + event.loaded
       const overallPct = Math.round((totalDone / totalBytes) * 100)
 
       let etaText: string | null = null
@@ -68,7 +69,7 @@ async function putFileToR2(
 
       onProgress({
         progress: Math.min(100, overallPct),
-        fileName: file.name,
+        fileName,
         batchIndex: index,
         batchTotal: total,
         etaText,
@@ -82,12 +83,12 @@ async function putFileToR2(
 
     xhr.onerror = () => reject(new Error('Upload failed'))
 
-    xhr.send(file)
+    xhr.send(body)
   })
 }
 
 /**
- * Upload one file to R2, insert as purpose=cover, set albums.cover_file_id.
+ * Upload one encrypted file to R2, insert as purpose=cover, set albums.cover_file_id.
  */
 export async function uploadCoverAndSetAlbum(
   file: File,
@@ -96,7 +97,9 @@ export async function uploadCoverAndSetAlbum(
   refs: Refs,
   onProgress: (p: BatchUploadProgress) => void,
 ): Promise<{ fileId: string }> {
-  const totalBytes = file.size
+  const key = await ensureEncryptionKey(userId)
+  const encryptedBlob = await encryptFile(file, key)
+  const totalBytes = encryptedBlob.size
   refs.uploadTotalBytesRef.current = totalBytes
   refs.uploadStartMsRef.current = Date.now()
 
@@ -110,7 +113,17 @@ export async function uploadCoverAndSetAlbum(
 
   const { uploadUrl, fileUrl } = await presignUpload(file.name)
 
-  await putFileToR2(file, uploadUrl, totalBytes, 0, 1, 1, refs, onProgress)
+  await putBlobToR2(
+    encryptedBlob,
+    uploadUrl,
+    totalBytes,
+    0,
+    1,
+    1,
+    refs,
+    onProgress,
+    file.name,
+  )
 
   const { data, error: insertError } = await supabase
     .from('files')
@@ -121,6 +134,7 @@ export async function uploadCoverAndSetAlbum(
       file_url: fileUrl,
       file_size_bytes: file.size,
       purpose: 'cover',
+      is_encrypted: true,
     })
     .select('id')
     .single()
@@ -148,7 +162,7 @@ export async function uploadCoverAndSetAlbum(
 }
 
 /**
- * Uploads files to R2 + inserts metadata. Same behavior as the in-album Dashboard flow.
+ * Uploads files to R2 + inserts metadata (encrypted ciphertext).
  */
 export async function batchUploadFilesToAlbum(
   filesArray: File[],
@@ -160,7 +174,15 @@ export async function batchUploadFilesToAlbum(
 ): Promise<{ failed: string[]; total: number }> {
   const purpose: FilePurpose = options?.purpose ?? 'content'
   const total = filesArray.length
-  const totalBytes = filesArray.reduce((s, f) => s + f.size, 0)
+  const key = await ensureEncryptionKey(userId)
+
+  const encryptedParts: { blob: Blob; file: File }[] = []
+  for (const file of filesArray) {
+    const blob = await encryptFile(file, key)
+    encryptedParts.push({ blob, file })
+  }
+
+  const totalBytes = encryptedParts.reduce((s, x) => s + x.blob.size, 0)
   refs.uploadTotalBytesRef.current = totalBytes
   refs.uploadStartMsRef.current = Date.now()
 
@@ -176,7 +198,7 @@ export async function batchUploadFilesToAlbum(
     etaText: null,
   })
 
-  for (const file of filesArray) {
+  for (const { blob, file } of encryptedParts) {
     index += 1
     onProgress({
       progress: Math.round(((index - 1) / total) * 100),
@@ -189,9 +211,19 @@ export async function batchUploadFilesToAlbum(
     try {
       const { uploadUrl, fileUrl } = await presignUpload(file.name)
 
-      await putFileToR2(file, uploadUrl, totalBytes, completedBytes, index, total, refs, onProgress)
+      await putBlobToR2(
+        blob,
+        uploadUrl,
+        totalBytes,
+        completedBytes,
+        index,
+        total,
+        refs,
+        onProgress,
+        file.name,
+      )
 
-      completedBytes += file.size
+      completedBytes += blob.size
 
       const { error: insertError } = await supabase.from('files').insert({
         user_id: userId,
@@ -200,6 +232,7 @@ export async function batchUploadFilesToAlbum(
         file_url: fileUrl,
         file_size_bytes: file.size,
         purpose,
+        is_encrypted: true,
       })
 
       if (insertError) throw new Error(insertError.message)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEventHandler, type PointerEventHandler, type WheelEventHandler } from 'react'
+import { useDecryptedMediaSrc } from '../../hooks/useDecryptedMediaSrc'
 
 export type MediaFile = {
   id: string
@@ -6,10 +7,12 @@ export type MediaFile = {
   file_name: string
   created_at: string
   file_size_bytes?: number | null
+  is_encrypted?: boolean | null
 }
 
 type Props = {
   open: boolean
+  userId: string
   files: MediaFile[]
   index: number
   onClose: () => void
@@ -25,9 +28,19 @@ function isVideoFile(fileName: string) {
   return /\.(mp4|webm|ogg|mov|mkv)$/i.test(lower)
 }
 
-export function MediaViewer({ open, files, index, onClose, onIndexChange }: Props) {
+export function MediaViewer({ open, userId, files, index, onClose, onIndexChange }: Props) {
   const file = files[index]
   const isVideo = file ? isVideoFile(file.file_name) : false
+
+  const displaySrc = useDecryptedMediaSrc(
+    file?.file_url ?? null,
+    file?.is_encrypted,
+    userId,
+    file?.file_name ?? '',
+  )
+
+  const mediaSrc = displaySrc ?? (file?.is_encrypted === true ? undefined : file?.file_url)
+  const downloadHref = displaySrc ?? (file?.is_encrypted === true ? undefined : file?.file_url)
 
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -75,7 +88,7 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
     el.playbackRate = playbackRate
     // Autoplay when opened. Some browsers require user gesture; we still attempt.
     void el.play().catch(() => {})
-  }, [open, isVideo, playbackRate, index])
+  }, [open, isVideo, playbackRate, index, mediaSrc])
 
   const resetPullDismiss = useCallback(() => {
     pullDismissRef.current = 0
@@ -332,7 +345,14 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
               </div>
             ) : null}
 
-            <a className="btn btn--ghost media-viewer__download" href={file.file_url} download>
+            <a
+              className="btn btn--ghost media-viewer__download"
+              href={downloadHref ?? '#'}
+              download={file.file_name}
+              onClick={(e) => {
+                if (!downloadHref) e.preventDefault()
+              }}
+            >
               Download
             </a>
             <button type="button" className="btn btn--ghost media-viewer__close" onClick={onClose}>
@@ -379,23 +399,27 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
             onDoubleClick={onDoubleClick}
           >
             {isVideo ? (
-              <video
-                key={file.id}
-                ref={videoRef}
-                className="media-viewer__video"
-                src={file.file_url}
-                controls
-                autoPlay
-                loop={videoLoop}
-                playsInline
-                preload="metadata"
-                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              />
-            ) : (
-              <div key={file.id} className="media-viewer__image-wrap">
+              mediaSrc ? (
+                <video
+                  key={`${file.id}-${mediaSrc}`}
+                  ref={videoRef}
+                  className="media-viewer__video"
+                  src={mediaSrc}
+                  controls
+                  autoPlay
+                  loop={videoLoop}
+                  playsInline
+                  preload="metadata"
+                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                />
+              ) : (
+                <div className="media-viewer__loading" aria-busy="true" />
+              )
+            ) : mediaSrc ? (
+              <div key={`${file.id}-${mediaSrc}`} className="media-viewer__image-wrap">
                 <img
                   className="media-viewer__image"
-                  src={file.file_url}
+                  src={mediaSrc}
                   alt={file.file_name}
                   draggable={false}
                   style={{
@@ -404,6 +428,8 @@ export function MediaViewer({ open, files, index, onClose, onIndexChange }: Prop
                   }}
                 />
               </div>
+            ) : (
+              <div className="media-viewer__loading" aria-busy="true" />
             )}
           </div>
         </div>

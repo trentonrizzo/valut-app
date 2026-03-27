@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { uploadCoverAndSetAlbum } from '../../lib/batchUploadToAlbum'
+import { useDecryptedMediaSrc } from '../../hooks/useDecryptedMediaSrc'
 import { isVideoFileName } from '../../lib/mediaTypes'
 import type { AlbumWithMeta } from '../../types/album'
 
@@ -11,6 +12,40 @@ type FileRow = {
   file_url: string
   created_at: string
   purpose: string | null
+  is_encrypted: boolean | null
+}
+
+function CoverPickerThumb({
+  fileUrl,
+  fileName,
+  isEncrypted,
+  userId,
+  isVid,
+}: {
+  fileUrl: string
+  fileName: string
+  isEncrypted: boolean
+  userId: string
+  isVid: boolean
+}) {
+  const src = useDecryptedMediaSrc(fileUrl, isEncrypted, userId, fileName)
+  const mediaSrc = src ?? (!isEncrypted ? fileUrl : null)
+  return (
+    <span className="album-cover-picker__thumb">
+      {isVid ? (
+        <>
+          {mediaSrc ? <video src={mediaSrc} muted playsInline preload="metadata" /> : null}
+          <span className="album-cover-picker__thumb-badge" aria-hidden>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7L8 5z" />
+            </svg>
+          </span>
+        </>
+      ) : mediaSrc ? (
+        <img src={mediaSrc} alt="" loading="lazy" />
+      ) : null}
+    </span>
+  )
 }
 
 type Props = {
@@ -57,7 +92,7 @@ export function AlbumCoverPickerModal({ open, album, userId, onClose, onSaved, o
       try {
         const { data, error: qErr } = await supabase
           .from('files')
-          .select('id, file_name, file_url, created_at, purpose')
+          .select('id, file_name, file_url, created_at, purpose, is_encrypted')
           .eq('album_id', album.id)
           .eq('user_id', userId)
           .order('created_at', { ascending: false })
@@ -292,20 +327,13 @@ export function AlbumCoverPickerModal({ open, album, userId, onClose, onSaved, o
                         aria-selected={isSelected}
                         onClick={() => setSelectedId(f.id)}
                       >
-                        <span className="album-cover-picker__thumb">
-                          {isVid ? (
-                            <>
-                              <video src={f.file_url} muted playsInline preload="metadata" />
-                              <span className="album-cover-picker__thumb-badge" aria-hidden>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                                  <path d="M8 5v14l11-7L8 5z" />
-                                </svg>
-                              </span>
-                            </>
-                          ) : (
-                            <img src={f.file_url} alt="" loading="lazy" />
-                          )}
-                        </span>
+                        <CoverPickerThumb
+                          fileUrl={f.file_url}
+                          fileName={f.file_name}
+                          isEncrypted={f.is_encrypted === true}
+                          userId={userId}
+                          isVid={isVid}
+                        />
                         <span className="album-cover-picker__name">
                           {f.file_name}
                           {isCoverAsset ? (

@@ -73,6 +73,7 @@ export function Dashboard() {
     created_at: string
     file_size_bytes?: number | null
     purpose?: string | null
+    is_encrypted?: boolean | null
   }
 
   function isGalleryFile(f: FileRow): boolean {
@@ -247,6 +248,7 @@ export function Dashboard() {
         file_name: f.file_name,
         created_at: f.created_at,
         file_size_bytes: f.file_size_bytes,
+        is_encrypted: f.is_encrypted,
       })),
     [displayFiles],
   )
@@ -350,6 +352,8 @@ export function Dashboard() {
       totalBytes: 0,
       previewUrl: null,
       previewIsVideo: false,
+      previewIsEncrypted: false,
+      previewFileName: null,
       order_index: nextOrder,
       cover_file_id: null,
     }
@@ -482,6 +486,7 @@ export function Dashboard() {
             ) : (
               <AlbumGrid
                 albums={albums}
+                userId={user?.id ?? ''}
                 columns={columns}
                 busyAlbumIds={busyIds}
                 activeAlbumId={openAlbumId}
@@ -835,6 +840,7 @@ export function Dashboard() {
             <MediaViewer
               key={viewerOpen ? 'viewer-open' : 'viewer-closed'}
               open={viewerOpen}
+              userId={user?.id ?? ''}
               files={mediaFiles}
               index={viewerIndex}
               onClose={() => {

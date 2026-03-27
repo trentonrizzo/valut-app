@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { AlbumWithMeta } from '../../types/album'
 import { formatBytes } from '../../lib/formatBytes'
+import { useDecryptedMediaSrc } from '../../hooks/useDecryptedMediaSrc'
 import { AlbumCardCoverVideo } from './AlbumCardCoverVideo'
 import { AlbumCardMenu } from './AlbumCardMenu'
 
@@ -12,6 +13,7 @@ function formatItemCount(n: number): string {
 
 type Props = {
   album: AlbumWithMeta
+  userId: string
   busy?: boolean
   active?: boolean
   /** Drag handle (e.g. sortable listeners); clicks do not open the album */
@@ -24,6 +26,7 @@ type Props = {
 
 export function AlbumCard({
   album,
+  userId,
   busy,
   active,
   dragHandle,
@@ -32,6 +35,13 @@ export function AlbumCard({
   onDelete,
   onSetCover,
 }: Props) {
+  const previewSrc = useDecryptedMediaSrc(
+    album.previewUrl,
+    album.previewIsEncrypted,
+    userId,
+    album.previewFileName ?? '',
+  )
+
   function openIfNotHandle(e: React.MouseEvent | React.KeyboardEvent) {
     if ('target' in e) {
       const el = e.target as HTMLElement
@@ -39,6 +49,8 @@ export function AlbumCard({
     }
     if (!busy) onOpen(album)
   }
+
+  const showMedia = Boolean(album.previewUrl && previewSrc)
 
   return (
     <article
@@ -56,11 +68,11 @@ export function AlbumCard({
     >
       <div className="album-card__thumb">
         {dragHandle ? <div className="album-card__drag-slot">{dragHandle}</div> : null}
-        {album.previewUrl ? (
+        {showMedia && previewSrc ? (
           <div className="album-card__thumb-inner album-card__thumb-inner--media">
             {album.previewIsVideo ? (
               <>
-                <AlbumCardCoverVideo src={album.previewUrl} className="album-card__thumb-img" />
+                <AlbumCardCoverVideo src={previewSrc} className="album-card__thumb-img" />
                 <span className="album-card__video-badge" aria-hidden>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7L8 5z" />
@@ -69,7 +81,7 @@ export function AlbumCard({
                 </span>
               </>
             ) : (
-              <img className="album-card__thumb-img" src={album.previewUrl} alt="" loading="lazy" />
+              <img className="album-card__thumb-img" src={previewSrc} alt="" loading="lazy" />
             )}
           </div>
         ) : (

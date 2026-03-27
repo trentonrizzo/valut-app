@@ -6,16 +6,19 @@ export interface Database {
           id: string
           email: string
           created_at: string
+          encryption_key: string | null
         }
         Insert: {
           id: string
           email: string
           created_at?: string
+          encryption_key?: string | null
         }
         Update: {
           id?: string
           email?: string
           created_at?: string
+          encryption_key?: string | null
         }
         Relationships: []
       }
@@ -64,6 +67,7 @@ export interface Database {
           created_at: string
           file_size_bytes: number | null
           purpose: string
+          is_encrypted: boolean
         }
         Insert: {
           id?: string
@@ -74,6 +78,7 @@ export interface Database {
           created_at?: string
           file_size_bytes?: number | null
           purpose?: string
+          is_encrypted?: boolean
         }
         Update: {
           id?: string
@@ -84,6 +89,7 @@ export interface Database {
           created_at?: string
           file_size_bytes?: number | null
           purpose?: string
+          is_encrypted?: boolean
         }
         Relationships: [
           {

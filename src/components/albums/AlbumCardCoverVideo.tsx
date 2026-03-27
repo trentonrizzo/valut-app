@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 
 type Props = {
-  src: string
+  src: string | null
   className?: string
 }
 
@@ -14,6 +14,7 @@ export function AlbumCardCoverVideo({ src, className }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    if (!src) return
     const video = videoRef.current
     const wrap = wrapRef.current
     if (!video || !wrap) return
@@ -42,6 +43,8 @@ export function AlbumCardCoverVideo({ src, className }: Props) {
       video.pause()
     }
   }, [src])
+
+  if (!src) return null
 
   return (
     <div ref={wrapRef} className="album-card__thumb-video-wrap">

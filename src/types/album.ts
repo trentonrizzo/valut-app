@@ -8,4 +8,8 @@ export type AlbumWithMeta = AlbumRow & {
   totalBytes: number
   previewUrl: string | null
   previewIsVideo: boolean
+  /** True when preview asset is stored encrypted (client-side AES-GCM). */
+  previewIsEncrypted: boolean
+  /** Original filename of the preview asset (for MIME when decrypting). */
+  previewFileName: string | null
 }

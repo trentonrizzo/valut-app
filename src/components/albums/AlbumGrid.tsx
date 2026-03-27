@@ -21,6 +21,7 @@ import { AlbumCard } from './AlbumCard'
 
 type Props = {
   albums: AlbumWithMeta[]
+  userId: string
   columns: number
   busyAlbumIds: ReadonlySet<string>
   activeAlbumId: string | null
@@ -34,6 +35,7 @@ type Props = {
 
 function SortableAlbumItem({
   album,
+  userId,
   busy,
   active,
   onOpen,
@@ -42,6 +44,7 @@ function SortableAlbumItem({
   onSetCover,
 }: {
   album: AlbumWithMeta
+  userId: string
   busy: boolean
   active: boolean
   onOpen: (album: AlbumWithMeta) => void
@@ -64,6 +67,7 @@ function SortableAlbumItem({
     <li ref={setNodeRef} style={style} className="album-grid__item">
       <AlbumCard
         album={album}
+        userId={userId}
         busy={busy}
         active={active}
         onOpen={onOpen}
@@ -95,6 +99,7 @@ function SortableAlbumItem({
 
 export function AlbumGrid({
   albums,
+  userId,
   columns,
   busyAlbumIds,
   activeAlbumId,
@@ -170,6 +175,7 @@ export function AlbumGrid({
               <SortableAlbumItem
                 key={album.id}
                 album={album}
+                userId={userId}
                 busy={busyAlbumIds.has(album.id)}
                 active={activeAlbumId === album.id}
                 onOpen={onOpen}

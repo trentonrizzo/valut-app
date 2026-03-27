@@ -12,6 +12,7 @@ export type FileRowForAlbumMeta = {
   file_size_bytes: number | null
   /** 'content' | 'cover'; missing/null treated as content */
   purpose: string | null
+  is_encrypted: boolean | null
 }
 
 export function isContentFile(f: FileRowForAlbumMeta): boolean {
@@ -42,6 +43,8 @@ function pickNewest(files: FileRowForAlbumMeta[]): FileRowForAlbumMeta | null {
 function previewForAlbum(album: AlbumRow, byAlbum: Map<string, FileRowForAlbumMeta[]>): {
   previewUrl: string | null
   previewIsVideo: boolean
+  previewIsEncrypted: boolean
+  previewFileName: string | null
 } {
   const all = byAlbum.get(album.id) ?? []
   const contentOnly = all.filter(isContentFile)
@@ -56,12 +59,14 @@ function previewForAlbum(album: AlbumRow, byAlbum: Map<string, FileRowForAlbumMe
   }
 
   if (!file) {
-    return { previewUrl: null, previewIsVideo: false }
+    return { previewUrl: null, previewIsVideo: false, previewIsEncrypted: false, previewFileName: null }
   }
 
   return {
     previewUrl: file.file_url,
     previewIsVideo: isVideoFileName(file.file_name),
+    previewIsEncrypted: file.is_encrypted === true,
+    previewFileName: file.file_name,
   }
 }
 
@@ -83,13 +88,18 @@ export function buildAlbumsWithMeta(
 
   return albums.map((album) => {
     const list = byAlbum.get(album.id) ?? []
-    const { previewUrl, previewIsVideo } = previewForAlbum(album, byAlbum)
+    const { previewUrl, previewIsVideo, previewIsEncrypted, previewFileName } = previewForAlbum(
+      album,
+      byAlbum,
+    )
     return {
       ...album,
       itemCount: countContentFiles(list),
       totalBytes: sumContentFileBytes(list),
       previewUrl,
       previewIsVideo,
+      previewIsEncrypted,
+      previewFileName,
     }
   })
 }
@@ -109,7 +119,7 @@ export async function fetchAlbumsWithCounts(userId: string) {
 
   const filesRes = await supabase
     .from('files')
-    .select('id, album_id, file_name, file_url, created_at, file_size_bytes, purpose')
+    .select('id, album_id, file_name, file_url, created_at, file_size_bytes, purpose, is_encrypted')
     .eq('user_id', userId)
 
   if (filesRes.error) {
