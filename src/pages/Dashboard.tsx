@@ -104,7 +104,6 @@ export function Dashboard() {
   const optimisticRowByQueueIdRef = useRef<Map<string, FileRow>>(new Map())
 
   const [uploadQueueItems, setUploadQueueItems] = useState<UploadQueueItem[]>([])
-  const [isAdding, setIsAdding] = useState(false)
 
   const [fileActionTarget, setFileActionTarget] = useState<FileRow | null>(null)
   const [fileInfoTarget, setFileInfoTarget] = useState<FileRow | null>(null)
@@ -176,8 +175,29 @@ export function Dashboard() {
 
   const runAlbumUpload = useCallback(
     async (filesArray: File[], optimisticUrls: string[], queueIds: string[]) => {
-      if (!user || !openAlbumId) return
-      if (filesArray.length === 0) return
+      const cleanupOptimistic = () => {
+        queueIds.forEach((qid, i) => {
+          const u = optimisticUrls[i]
+          if (u) URL.revokeObjectURL(u)
+          optimisticRowByQueueIdRef.current.delete(qid)
+          fileByQueueIdRef.current.delete(qid)
+        })
+        setFiles((prev) => prev.filter((row) => !queueIds.includes(row.id)))
+        setUploadQueueItems((prev) => prev.filter((item) => !queueIds.includes(item.id)))
+      }
+
+      if (!user || !openAlbumId) {
+        console.error('UPLOAD ABORT: missing user or album')
+        cleanupOptimistic()
+        finishAlbumUploadUi()
+        alert('Upload failed: not signed in or no album open.')
+        return
+      }
+      if (filesArray.length === 0) {
+        cleanupOptimistic()
+        finishAlbumUploadUi()
+        return
+      }
 
       let fileIds: (string | null)[]
       let failed: string[]
@@ -234,6 +254,7 @@ export function Dashboard() {
         )
         console.error(err)
         showToast(msg, 'error')
+        alert(`Upload failed: ${msg}`)
         finishAlbumUploadUi()
         return
       }
@@ -250,7 +271,10 @@ export function Dashboard() {
         if (selectError) throw new Error(selectError.message)
         serverRows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
       } catch (err) {
-        showToast(err instanceof Error ? err.message : 'Could not refresh album', 'error')
+        const refreshMsg = err instanceof Error ? err.message : 'Could not refresh album'
+        console.error(err)
+        showToast(refreshMsg, 'error')
+        alert(`Upload failed: ${refreshMsg}`)
         setUploadQueueItems((prev) =>
           prev.map((item) => {
             const i = queueIds.indexOf(item.id)
@@ -698,29 +722,35 @@ export function Dashboard() {
                 </select>
                 <label
                   className="btn btn--outline vault-upload-btn vault-upload-btn--toolbar"
-                  aria-disabled={isAdding || uploading || !openAlbumId}
+                  aria-disabled={uploading || !openAlbumId}
                 >
                   Upload
                   <input
                   type="file"
                   accept="image/*,video/*"
                   multiple
-                  disabled={isAdding || uploading || !openAlbumId}
+                  disabled={uploading || !openAlbumId}
                   onChange={(e) => {
-                    const list = e.target.files
-                    e.currentTarget.value = ''
-                    if (!list || !openAlbumId) return
-                    const filesArray = Array.from(list)
+                    const input = e.currentTarget
+                    const filesArray = input.files ? Array.from(input.files) : []
+                    input.value = ''
                     if (filesArray.length === 0) return
-                    if (isAdding || uploadLockRef.current) return
+                    const albumIdForUpload = openAlbumId
+                    if (!albumIdForUpload) {
+                      showToast('Open an album first, then upload.', 'error')
+                      return
+                    }
                     if (!user) {
                       showToast('Please sign in to upload.', 'error')
                       return
                     }
+                    if (uploadLockRef.current) {
+                      console.warn('UPLOAD SKIP: already uploading')
+                      return
+                    }
                     if (!validateUploadFileSizes(filesArray)) return
 
-                    setIsAdding(true)
-                    setTimeout(() => setIsAdding(false), 500)
+                    console.log('UPLOAD START', filesArray.length)
 
                     const optimisticUrls: string[] = []
                     const queueIds: string[] = []
@@ -733,7 +763,7 @@ export function Dashboard() {
                       const row: FileRow = {
                         id: oid,
                         user_id: user.id,
-                        album_id: openAlbumId,
+                        album_id: albumIdForUpload,
                         file_name: f.name,
                         file_url: url,
                         created_at: new Date().toISOString(),

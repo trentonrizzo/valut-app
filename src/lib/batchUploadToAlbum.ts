@@ -257,6 +257,7 @@ export async function batchUploadFilesToAlbum(
 
   for (let fileIndex = 0; fileIndex < total; fileIndex++) {
     const file = filesArray[fileIndex]!
+    console.log('UPLOADING FILE', file.name)
     weight[fileIndex] = 0.05
     emitProgress(fileIndex, file.name, 5)
 

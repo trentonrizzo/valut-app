@@ -27,7 +27,6 @@ export function Upload() {
   const fileByQueueIdRef = useRef<Map<string, File>>(new Map())
 
   const [uploadQueueItems, setUploadQueueItems] = useState<UploadQueueItem[]>([])
-  const [isAdding, setIsAdding] = useState(false)
 
   const refreshAlbums = useCallback(async () => {
     if (!user) return
@@ -75,11 +74,20 @@ export function Upload() {
   const runUpload = useCallback(
     async (filesArray: File[], queueIds: string[]) => {
       if (!user || !albumId) {
+        console.error('UPLOAD ABORT: missing user or album')
+        queueIds.forEach((qid) => fileByQueueIdRef.current.delete(qid))
+        setUploadQueueItems((prev) => prev.filter((item) => !queueIds.includes(item.id)))
         showToast('Choose an album first.', 'error')
+        alert('Upload failed: choose an album first.')
         finishUploadUi()
         return
       }
-      if (filesArray.length === 0) return
+      if (filesArray.length === 0) {
+        queueIds.forEach((qid) => fileByQueueIdRef.current.delete(qid))
+        setUploadQueueItems((prev) => prev.filter((item) => !queueIds.includes(item.id)))
+        finishUploadUi()
+        return
+      }
 
       let fileIds: (string | null)[]
       let failed: string[]
@@ -131,6 +139,7 @@ export function Upload() {
           ),
         )
         showToast(msg, 'error')
+        alert(`Upload failed: ${msg}`)
         finishUploadUi()
         return
       }
@@ -231,7 +240,7 @@ export function Upload() {
               className="field-input"
               value={albumId}
               onChange={(e) => setAlbumId(e.target.value)}
-              disabled={uploading || isAdding}
+              disabled={uploading}
             >
               {albums.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -241,27 +250,29 @@ export function Upload() {
             </select>
           </label>
 
-          <label className="upload-page__drop btn btn--primary btn--block" aria-disabled={isAdding || uploading || !albumId}>
+          <label className="upload-page__drop btn btn--primary btn--block" aria-disabled={uploading || !albumId}>
             Choose files
             <input
               type="file"
               accept="image/*,video/*"
               multiple
-              disabled={isAdding || uploading || !albumId}
+              disabled={uploading || !albumId}
               onChange={(e) => {
-                const list = e.target.files
-                e.currentTarget.value = ''
-                if (!list || list.length === 0) return
-                const filesArray = Array.from(list)
-                if (isAdding || uploadLockRef.current) return
+                const input = e.currentTarget
+                const filesArray = input.files ? Array.from(input.files) : []
+                input.value = ''
+                if (filesArray.length === 0) return
                 if (!user || !albumId) {
                   showToast('Choose an album first.', 'error')
                   return
                 }
+                if (uploadLockRef.current) {
+                  console.warn('UPLOAD SKIP: already uploading')
+                  return
+                }
                 if (!validateUploadFileSizes(filesArray)) return
 
-                setIsAdding(true)
-                setTimeout(() => setIsAdding(false), 500)
+                console.log('UPLOAD START', filesArray.length)
 
                 const queueIds = filesArray.map(() => crypto.randomUUID())
                 queueIds.forEach((id, i) => fileByQueueIdRef.current.set(id, filesArray[i]!))
