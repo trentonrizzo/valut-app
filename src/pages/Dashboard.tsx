@@ -13,7 +13,7 @@ import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
 import { AlbumCoverPickerModal } from '../components/albums/AlbumCoverPickerModal'
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
-import { UploadProgressOverlay } from '../components/UploadProgressOverlay'
+import { UploadQueueOverlay, type UploadQueueItem } from '../components/UploadQueueOverlay'
 import { batchUploadFilesToAlbum, validateUploadFileSizes } from '../lib/batchUploadToAlbum'
 import { setDecryptedBlobUrlForFile } from '../lib/decryptedBlobCache'
 import { sortGalleryFiles, type FileSort } from '../lib/gallerySort'
@@ -99,6 +99,11 @@ export function Dashboard() {
   const uploadStartMsRef = useRef(0)
   const uploadTotalBytesRef = useRef(0)
   const uploadLockRef = useRef(false)
+  const fileByQueueIdRef = useRef<Map<string, File>>(new Map())
+  const optimisticRowByQueueIdRef = useRef<Map<string, FileRow>>(new Map())
+
+  const [uploadQueueItems, setUploadQueueItems] = useState<UploadQueueItem[]>([])
+  const [isAdding, setIsAdding] = useState(false)
 
   const [fileActionTarget, setFileActionTarget] = useState<FileRow | null>(null)
   const [fileInfoTarget, setFileInfoTarget] = useState<FileRow | null>(null)
@@ -148,6 +153,205 @@ export function Dashboard() {
     setFetchError(null)
     setAlbums(data ?? [])
   }, [user])
+
+  const finishAlbumUploadUi = useCallback(() => {
+    uploadLockRef.current = false
+    setUploading(false)
+    setUploadProgress(0)
+    setUploadFileName(null)
+    setUploadBatchIndex(0)
+    setUploadBatchTotal(0)
+    setUploadEtaText(null)
+  }, [])
+
+  const runAlbumUpload = useCallback(
+    async (filesArray: File[], optimisticUrls: string[], queueIds: string[]) => {
+      if (!user || !openAlbumId) return
+      if (filesArray.length === 0) return
+
+      let fileIds: (string | null)[]
+      let failed: string[]
+      let total: number
+
+      try {
+        const r = await batchUploadFilesToAlbum(
+          filesArray,
+          openAlbumId,
+          user.id,
+          { uploadStartMsRef, uploadTotalBytesRef },
+          (p) => {
+            setUploadProgress(p.progress)
+            setUploadFileName(p.fileName)
+            setUploadBatchIndex(p.batchIndex)
+            setUploadBatchTotal(p.batchTotal)
+            setUploadEtaText(p.etaText)
+            const idx = p.currentFileIndex - 1
+            if (idx >= 0 && idx < queueIds.length) {
+              const targetId = queueIds[idx]!
+              setUploadQueueItems((prev) =>
+                prev.map((item) =>
+                  item.id === targetId
+                    ? {
+                        ...item,
+                        progress: p.currentFilePercent ?? item.progress,
+                        name: p.fileName ?? item.name,
+                      }
+                    : item,
+                ),
+              )
+            }
+          },
+        )
+        fileIds = r.fileIds
+        failed = r.failed
+        total = r.total
+      } catch (err) {
+        queueIds.forEach((qid, i) => {
+          URL.revokeObjectURL(optimisticUrls[i]!)
+          optimisticRowByQueueIdRef.current.delete(qid)
+          fileByQueueIdRef.current.delete(qid)
+        })
+        setFiles((prev) => prev.filter((row) => !queueIds.includes(row.id)))
+        setUploadQueueItems((prev) =>
+          prev.map((item) =>
+            queueIds.includes(item.id) ? { ...item, status: 'failed' } : item,
+          ),
+        )
+        console.error(err)
+        showToast(err instanceof Error ? err.message : 'Upload failed', 'error')
+        finishAlbumUploadUi()
+        return
+      }
+
+      for (let i = 0; i < filesArray.length; i++) {
+        const fid = fileIds[i]
+        if (fid) setDecryptedBlobUrlForFile(fid, optimisticUrls[i]!)
+      }
+
+      let serverRows: FileRow[] = []
+      try {
+        const { data, error: selectError } = await supabase
+          .from('files')
+          .select('*')
+          .eq('album_id', openAlbumId)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+
+        if (selectError) throw new Error(selectError.message)
+        serverRows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'Could not refresh album', 'error')
+        setUploadQueueItems((prev) =>
+          prev.map((item) => {
+            const i = queueIds.indexOf(item.id)
+            if (i === -1) return item
+            if (fileIds[i]) return { ...item, status: 'done', progress: 100 }
+            return { ...item, status: 'failed', progress: item.progress }
+          }),
+        )
+        await refreshAlbums()
+        finishAlbumUploadUi()
+        return
+      }
+
+      const keepFailed: FileRow[] = []
+      queueIds.forEach((qid, i) => {
+        if (!fileIds[i]) {
+          const row = optimisticRowByQueueIdRef.current.get(qid)
+          if (row) keepFailed.push(row)
+        } else {
+          optimisticRowByQueueIdRef.current.delete(qid)
+          fileByQueueIdRef.current.delete(qid)
+        }
+      })
+
+      setFiles([...keepFailed, ...serverRows])
+      await refreshAlbums()
+
+      setUploadQueueItems((prev) =>
+        prev.map((item) => {
+          const i = queueIds.indexOf(item.id)
+          if (i === -1) return item
+          if (fileIds[i]) return { ...item, status: 'done', progress: 100 }
+          return { ...item, status: 'failed', progress: item.progress }
+        }),
+      )
+
+      if (failed.length === 0) {
+        showToast(total === 1 ? 'Upload complete' : `Uploaded ${total} files`)
+        setTimeout(() => {
+          setUploadQueueItems((prev) => prev.filter((it) => !queueIds.includes(it.id)))
+        }, 400)
+      } else if (failed.length === total) {
+        showToast('All uploads failed', 'error')
+      } else {
+        showToast(
+          `Uploaded ${total - failed.length} of ${total} files. Failed: ${failed.join(', ')}`,
+          'error',
+        )
+      }
+
+      finishAlbumUploadUi()
+    },
+    [user, openAlbumId, showToast, refreshAlbums, finishAlbumUploadUi],
+  )
+
+  const dismissFailedUploadQueue = useCallback(() => {
+    setUploadQueueItems((prev) => {
+      const failed = prev.filter((i) => i.status === 'failed')
+      for (const item of failed) {
+        const row = optimisticRowByQueueIdRef.current.get(item.id)
+        if (row?.file_url.startsWith('blob:')) URL.revokeObjectURL(row.file_url)
+        optimisticRowByQueueIdRef.current.delete(item.id)
+        fileByQueueIdRef.current.delete(item.id)
+      }
+      const failedIds = new Set(failed.map((i) => i.id))
+      if (failedIds.size) {
+        setFiles((filesPrev) => filesPrev.filter((f) => !failedIds.has(f.id)))
+      }
+      return []
+    })
+  }, [])
+
+  const retryUploadQueueItem = useCallback(
+    (queueId: string) => {
+      const file = fileByQueueIdRef.current.get(queueId)
+      if (!file || !user || !openAlbumId) return
+      const row = optimisticRowByQueueIdRef.current.get(queueId)
+      const optimisticUrl = row?.file_url ?? URL.createObjectURL(file)
+      if (!row) {
+        const newRow: FileRow = {
+          id: queueId,
+          user_id: user.id,
+          album_id: openAlbumId,
+          file_name: file.name,
+          file_url: optimisticUrl,
+          created_at: new Date().toISOString(),
+          file_size_bytes: file.size,
+          purpose: 'content',
+          is_encrypted: false,
+          mime_type: file.type || null,
+        }
+        optimisticRowByQueueIdRef.current.set(queueId, newRow)
+        setFiles((prev) => (prev.some((f) => f.id === queueId) ? prev : [newRow, ...prev]))
+      }
+
+      setUploadQueueItems((prev) =>
+        prev.map((it) => (it.id === queueId ? { ...it, status: 'uploading', progress: 0 } : it)),
+      )
+      setUploading(true)
+      uploadLockRef.current = true
+      setUploadProgress(0)
+      setUploadFileName(file.name)
+      setUploadBatchTotal(1)
+      setUploadBatchIndex(1)
+      setUploadEtaText(null)
+      setTimeout(() => {
+        void runAlbumUpload([file], [optimisticUrl], [queueId])
+      }, 0)
+    },
+    [user, openAlbumId, runAlbumUpload],
+  )
 
   const persistAlbumOrder = useCallback(
     async (reordered: AlbumWithMeta[]) => {
@@ -469,135 +673,92 @@ export function Dashboard() {
                   <option value="images_first">Images first</option>
                   <option value="videos_first">Videos first</option>
                 </select>
-                <label className="btn btn--outline vault-upload-btn vault-upload-btn--toolbar" aria-disabled={uploading || !openAlbumId}>
+                <label
+                  className="btn btn--outline vault-upload-btn vault-upload-btn--toolbar"
+                  aria-disabled={isAdding || uploading || !openAlbumId}
+                >
                   Upload
                   <input
                   type="file"
                   accept="image/*,video/*"
                   multiple
-                  disabled={uploading || !openAlbumId}
+                  disabled={isAdding || uploading || !openAlbumId}
                   onChange={(e) => {
                     const list = e.target.files
-                    if (list && openAlbumId) {
-                      const filesArray = Array.from(list)
-                      void (async () => {
-                        if (filesArray.length === 0) return
-                        if (uploading || uploadLockRef.current) return
-                        if (!user) {
-                          showToast('Please sign in to upload.', 'error')
-                          return
-                        }
-                        if (!validateUploadFileSizes(filesArray)) return
-
-                        uploadLockRef.current = true
-                        const optimisticUrls: string[] = []
-                        const optimisticRows: FileRow[] = filesArray.map((f) => {
-                          const url = URL.createObjectURL(f)
-                          optimisticUrls.push(url)
-                          return {
-                            id: `optimistic-${crypto.randomUUID()}`,
-                            user_id: user.id,
-                            album_id: openAlbumId,
-                            file_name: f.name,
-                            file_url: url,
-                            created_at: new Date().toISOString(),
-                            file_size_bytes: f.size,
-                            purpose: 'content',
-                            is_encrypted: false,
-                            mime_type: f.type || null,
-                          }
-                        })
-
-                        setFiles((prev) => [...optimisticRows, ...prev])
-
-                        setUploading(true)
-                        setUploadProgress(0)
-                        setUploadFileName(filesArray[0].name)
-                        setUploadBatchTotal(filesArray.length)
-                        setUploadBatchIndex(1)
-                        setUploadEtaText(null)
-
-                        try {
-                          const { failed, total, fileIds } = await batchUploadFilesToAlbum(
-                            filesArray,
-                            openAlbumId,
-                            user.id,
-                            { uploadStartMsRef, uploadTotalBytesRef },
-                            (p) => {
-                              setUploadProgress(p.progress)
-                              setUploadFileName(p.fileName)
-                              setUploadBatchIndex(p.batchIndex)
-                              setUploadBatchTotal(p.batchTotal)
-                              setUploadEtaText(p.etaText)
-                            },
-                          )
-
-                          for (let i = 0; i < filesArray.length; i++) {
-                            const fid = fileIds[i]
-                            if (fid) setDecryptedBlobUrlForFile(fid, optimisticUrls[i])
-                            else URL.revokeObjectURL(optimisticUrls[i])
-                          }
-
-                          const { data, error: selectError } = await supabase
-                            .from('files')
-                            .select('*')
-                            .eq('album_id', openAlbumId)
-                            .eq('user_id', user.id)
-                            .order('created_at', { ascending: false })
-
-                          if (selectError) throw new Error(selectError.message)
-
-                          const rows = (data as FileRow[]) ?? []
-                          setFiles(rows.filter(isGalleryFile))
-                          await refreshAlbums()
-
-                          if (failed.length === 0) {
-                            showToast(
-                              total === 1
-                                ? 'Upload complete'
-                                : `Uploaded ${total} file${total === 1 ? '' : 's'}`,
-                            )
-                          } else if (failed.length === total) {
-                            showToast('All uploads failed', 'error')
-                          } else {
-                            showToast(
-                              `Uploaded ${
-                                total - failed.length
-                              } of ${total} files. Failed: ${failed.join(', ')}`,
-                              'error',
-                            )
-                          }
-                        } catch (err) {
-                          optimisticUrls.forEach((u) => URL.revokeObjectURL(u))
-                          setFiles((prev) => prev.filter((row) => !row.id.startsWith('optimistic-')))
-                          console.error(err)
-                          globalThis.alert('Upload failed. Try again.')
-                          showToast(err instanceof Error ? err.message : 'Upload failed', 'error')
-                        } finally {
-                          uploadLockRef.current = false
-                          setUploading(false)
-                          setUploadProgress(0)
-                          setUploadFileName(null)
-                          setUploadBatchIndex(0)
-                          setUploadBatchTotal(0)
-                          setUploadEtaText(null)
-                        }
-                      })()
-                    }
                     e.currentTarget.value = ''
+                    if (!list || !openAlbumId) return
+                    const filesArray = Array.from(list)
+                    if (filesArray.length === 0) return
+                    if (isAdding || uploadLockRef.current) return
+                    if (!user) {
+                      showToast('Please sign in to upload.', 'error')
+                      return
+                    }
+                    if (!validateUploadFileSizes(filesArray)) return
+
+                    setIsAdding(true)
+                    setTimeout(() => setIsAdding(false), 500)
+
+                    const optimisticUrls: string[] = []
+                    const queueIds: string[] = []
+                    const optimisticRows: FileRow[] = filesArray.map((f) => {
+                      const url = URL.createObjectURL(f)
+                      optimisticUrls.push(url)
+                      const oid = `optimistic-${crypto.randomUUID()}`
+                      queueIds.push(oid)
+                      fileByQueueIdRef.current.set(oid, f)
+                      const row: FileRow = {
+                        id: oid,
+                        user_id: user.id,
+                        album_id: openAlbumId,
+                        file_name: f.name,
+                        file_url: url,
+                        created_at: new Date().toISOString(),
+                        file_size_bytes: f.size,
+                        purpose: 'content',
+                        is_encrypted: false,
+                        mime_type: f.type || null,
+                      }
+                      optimisticRowByQueueIdRef.current.set(oid, row)
+                      return row
+                    })
+
+                    const queueItems: UploadQueueItem[] = queueIds.map((id, i) => ({
+                      id,
+                      name: filesArray[i]!.name,
+                      progress: 0,
+                      status: 'uploading',
+                    }))
+
+                    setFiles((prev) => [...optimisticRows, ...prev])
+                    setUploadQueueItems((prev) => [...queueItems, ...prev])
+                    setUploading(true)
+                    setUploadProgress(0)
+                    setUploadFileName(filesArray[0]!.name)
+                    setUploadBatchTotal(filesArray.length)
+                    setUploadBatchIndex(1)
+                    setUploadEtaText(null)
+
+                    uploadLockRef.current = true
+                    setTimeout(() => {
+                      void runAlbumUpload(filesArray, optimisticUrls, queueIds)
+                    }, 0)
                   }}
                 />
               </label>
               </div>
             </div>
 
-            <UploadProgressOverlay
-              uploading={uploading}
-              uploadProgress={uploadProgress}
-              uploadFileName={uploadFileName}
-              uploadBatchIndex={uploadBatchIndex}
-              uploadBatchTotal={uploadBatchTotal}
-              uploadEtaText={uploadEtaText}
+            <UploadQueueOverlay
+              visible={uploading || uploadQueueItems.some((i) => i.status === 'failed')}
+              items={uploadQueueItems}
+              overallProgress={uploadProgress}
+              etaText={uploadEtaText}
+              currentFileIndex={uploadBatchIndex}
+              batchTotal={uploadBatchTotal}
+              currentFileName={uploadFileName}
+              onRetry={retryUploadQueueItem}
+              onDismiss={dismissFailedUploadQueue}
             />
 
             {filesError ? (

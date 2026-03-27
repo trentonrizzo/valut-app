@@ -4,7 +4,7 @@ import { useToast } from '../context/useToast'
 import { fetchAlbumsWithCounts } from '../lib/albumQueries'
 import { batchUploadFilesToAlbum, validateUploadFileSizes } from '../lib/batchUploadToAlbum'
 import type { AlbumWithMeta } from '../types/album'
-import { UploadProgressOverlay } from '../components/UploadProgressOverlay'
+import { UploadQueueOverlay, type UploadQueueItem } from '../components/UploadQueueOverlay'
 
 export function Upload() {
   const { user } = useAuth()
@@ -23,6 +23,10 @@ export function Upload() {
   const uploadStartMsRef = useRef(0)
   const uploadTotalBytesRef = useRef(0)
   const uploadLockRef = useRef(false)
+  const fileByQueueIdRef = useRef<Map<string, File>>(new Map())
+
+  const [uploadQueueItems, setUploadQueueItems] = useState<UploadQueueItem[]>([])
+  const [isAdding, setIsAdding] = useState(false)
 
   const refreshAlbums = useCallback(async () => {
     if (!user) return
@@ -56,42 +60,94 @@ export function Upload() {
     }
   }, [user])
 
-  async function runUpload(filesArray: File[]) {
-    if (!user || !albumId) {
-      showToast('Choose an album first.', 'error')
-      return
-    }
-    if (filesArray.length === 0) return
-    if (uploading || uploadLockRef.current) return
-    if (!validateUploadFileSizes(filesArray)) return
-
-    uploadLockRef.current = true
-    setUploading(true)
+  const finishUploadUi = useCallback(() => {
+    uploadLockRef.current = false
+    setUploading(false)
     setUploadProgress(0)
-    setUploadFileName(filesArray[0].name)
-    setUploadBatchTotal(filesArray.length)
-    setUploadBatchIndex(1)
+    setUploadFileName(null)
+    setUploadBatchIndex(0)
+    setUploadBatchTotal(0)
     setUploadEtaText(null)
+  }, [])
 
-    try {
-      const { failed, total } = await batchUploadFilesToAlbum(
-        filesArray,
-        albumId,
-        user.id,
-        { uploadStartMsRef, uploadTotalBytesRef },
-        (p) => {
-          setUploadProgress(p.progress)
-          setUploadFileName(p.fileName)
-          setUploadBatchIndex(p.batchIndex)
-          setUploadBatchTotal(p.batchTotal)
-          setUploadEtaText(p.etaText)
-        },
+  const runUpload = useCallback(
+    async (filesArray: File[], queueIds: string[]) => {
+      if (!user || !albumId) {
+        showToast('Choose an album first.', 'error')
+        finishUploadUi()
+        return
+      }
+      if (filesArray.length === 0) return
+
+      let fileIds: (string | null)[]
+      let failed: string[]
+      let total: number
+
+      try {
+        const r = await batchUploadFilesToAlbum(
+          filesArray,
+          albumId,
+          user.id,
+          { uploadStartMsRef, uploadTotalBytesRef },
+          (p) => {
+            setUploadProgress(p.progress)
+            setUploadFileName(p.fileName)
+            setUploadBatchIndex(p.batchIndex)
+            setUploadBatchTotal(p.batchTotal)
+            setUploadEtaText(p.etaText)
+            const idx = p.currentFileIndex - 1
+            if (idx >= 0 && idx < queueIds.length) {
+              const targetId = queueIds[idx]!
+              setUploadQueueItems((prev) =>
+                prev.map((item) =>
+                  item.id === targetId
+                    ? {
+                        ...item,
+                        progress: p.currentFilePercent ?? item.progress,
+                        name: p.fileName ?? item.name,
+                      }
+                    : item,
+                ),
+              )
+            }
+          },
+        )
+        fileIds = r.fileIds
+        failed = r.failed
+        total = r.total
+      } catch (e) {
+        console.error(e)
+        queueIds.forEach((qid) => fileByQueueIdRef.current.delete(qid))
+        setUploadQueueItems((prev) =>
+          prev.map((item) =>
+            queueIds.includes(item.id) ? { ...item, status: 'failed' } : item,
+          ),
+        )
+        showToast(e instanceof Error ? e.message : 'Upload failed', 'error')
+        finishUploadUi()
+        return
+      }
+
+      setUploadQueueItems((prev) =>
+        prev.map((item) => {
+          const i = queueIds.indexOf(item.id)
+          if (i === -1) return item
+          if (fileIds[i]) return { ...item, status: 'done', progress: 100 }
+          return { ...item, status: 'failed', progress: item.progress }
+        }),
       )
+
+      queueIds.forEach((qid, i) => {
+        if (fileIds[i]) fileByQueueIdRef.current.delete(qid)
+      })
 
       await refreshAlbums()
 
       if (failed.length === 0) {
         showToast(total === 1 ? 'Upload complete' : `Uploaded ${total} files`)
+        setTimeout(() => {
+          setUploadQueueItems((prev) => prev.filter((it) => !queueIds.includes(it.id)))
+        }, 400)
       } else if (failed.length === total) {
         showToast('All uploads failed', 'error')
       } else {
@@ -100,20 +156,42 @@ export function Upload() {
           'error',
         )
       }
-    } catch (e) {
-      console.error(e)
-      globalThis.alert('Upload failed. Try again.')
-      showToast(e instanceof Error ? e.message : 'Upload failed', 'error')
-    } finally {
-      uploadLockRef.current = false
-      setUploading(false)
+
+      finishUploadUi()
+    },
+    [user, albumId, showToast, refreshAlbums, finishUploadUi],
+  )
+
+  const dismissFailedUploadQueue = useCallback(() => {
+    setUploadQueueItems((prev) => {
+      const failed = prev.filter((i) => i.status === 'failed')
+      for (const item of failed) {
+        fileByQueueIdRef.current.delete(item.id)
+      }
+      return []
+    })
+  }, [])
+
+  const retryUploadQueueItem = useCallback(
+    (queueId: string) => {
+      const file = fileByQueueIdRef.current.get(queueId)
+      if (!file || !user || !albumId) return
+      setUploadQueueItems((prev) =>
+        prev.map((it) => (it.id === queueId ? { ...it, status: 'uploading', progress: 0 } : it)),
+      )
+      setUploading(true)
+      uploadLockRef.current = true
       setUploadProgress(0)
-      setUploadFileName(null)
-      setUploadBatchIndex(0)
-      setUploadBatchTotal(0)
+      setUploadFileName(file.name)
+      setUploadBatchTotal(1)
+      setUploadBatchIndex(1)
       setUploadEtaText(null)
-    }
-  }
+      setTimeout(() => {
+        void runUpload([file], [queueId])
+      }, 0)
+    },
+    [user, albumId, runUpload],
+  )
 
   return (
     <div className="upload-page">
@@ -136,7 +214,7 @@ export function Upload() {
               className="field-input"
               value={albumId}
               onChange={(e) => setAlbumId(e.target.value)}
-              disabled={uploading}
+              disabled={uploading || isAdding}
             >
               {albums.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -146,19 +224,50 @@ export function Upload() {
             </select>
           </label>
 
-          <label className="upload-page__drop btn btn--primary btn--block">
+          <label className="upload-page__drop btn btn--primary btn--block" aria-disabled={isAdding || uploading || !albumId}>
             Choose files
             <input
               type="file"
               accept="image/*,video/*"
               multiple
-              disabled={uploading || !albumId}
+              disabled={isAdding || uploading || !albumId}
               onChange={(e) => {
                 const list = e.target.files
-                if (list && list.length > 0) {
-                  void runUpload(Array.from(list))
-                }
                 e.currentTarget.value = ''
+                if (!list || list.length === 0) return
+                const filesArray = Array.from(list)
+                if (isAdding || uploadLockRef.current) return
+                if (!user || !albumId) {
+                  showToast('Choose an album first.', 'error')
+                  return
+                }
+                if (!validateUploadFileSizes(filesArray)) return
+
+                setIsAdding(true)
+                setTimeout(() => setIsAdding(false), 500)
+
+                const queueIds = filesArray.map(() => crypto.randomUUID())
+                queueIds.forEach((id, i) => fileByQueueIdRef.current.set(id, filesArray[i]!))
+
+                const queueItems: UploadQueueItem[] = queueIds.map((id, i) => ({
+                  id,
+                  name: filesArray[i]!.name,
+                  progress: 0,
+                  status: 'uploading',
+                }))
+
+                setUploadQueueItems((prev) => [...queueItems, ...prev])
+                setUploading(true)
+                setUploadProgress(0)
+                setUploadFileName(filesArray[0]!.name)
+                setUploadBatchTotal(filesArray.length)
+                setUploadBatchIndex(1)
+                setUploadEtaText(null)
+
+                uploadLockRef.current = true
+                setTimeout(() => {
+                  void runUpload(filesArray, queueIds)
+                }, 0)
               }}
             />
           </label>
@@ -166,13 +275,16 @@ export function Upload() {
         </div>
       )}
 
-      <UploadProgressOverlay
-        uploading={uploading}
-        uploadProgress={uploadProgress}
-        uploadFileName={uploadFileName}
-        uploadBatchIndex={uploadBatchIndex}
-        uploadBatchTotal={uploadBatchTotal}
-        uploadEtaText={uploadEtaText}
+      <UploadQueueOverlay
+        visible={uploading || uploadQueueItems.some((i) => i.status === 'failed')}
+        items={uploadQueueItems}
+        overallProgress={uploadProgress}
+        etaText={uploadEtaText}
+        currentFileIndex={uploadBatchIndex}
+        batchTotal={uploadBatchTotal}
+        currentFileName={uploadFileName}
+        onRetry={retryUploadQueueItem}
+        onDismiss={dismissFailedUploadQueue}
       />
     </div>
   )

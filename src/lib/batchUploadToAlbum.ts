@@ -13,6 +13,8 @@ export type BatchUploadProgress = {
   etaText: string | null
   /** 1-based index of the file currently being processed */
   currentFileIndex: number
+  /** 0–100 for the active file only (encrypt + upload) */
+  currentFilePercent?: number
 }
 
 export type FilePurpose = 'content' | 'cover'
@@ -116,6 +118,7 @@ export async function uploadCoverAndSetAlbum(
     batchTotal: 1,
     etaText: null,
     currentFileIndex: 1,
+    currentFilePercent: 0,
   })
 
   const { uploadUrl, fileUrl } = await presignUpload(file.name)
@@ -134,14 +137,15 @@ export async function uploadCoverAndSetAlbum(
         }
       }
     }
-    onProgress({
-      progress: pct,
-      fileName: file.name,
-      batchIndex: 1,
-      batchTotal: 1,
-      etaText,
-      currentFileIndex: 1,
-    })
+  onProgress({
+    progress: pct,
+    fileName: file.name,
+    batchIndex: 1,
+    batchTotal: 1,
+    etaText,
+    currentFileIndex: 1,
+    currentFilePercent: pct,
+  })
   })
 
   const { data, error: insertError } = await supabase
@@ -177,6 +181,7 @@ export async function uploadCoverAndSetAlbum(
     batchTotal: 1,
     etaText: null,
     currentFileIndex: 1,
+    currentFilePercent: 100,
   })
 
   return { fileId: data.id }
@@ -217,7 +222,11 @@ export async function batchUploadFilesToAlbum(
   /** Per-file completion weight 0–1 for overall progress */
   const weight = new Float64Array(total)
 
-  const emitProgress = (fileIndexZeroBased: number, fileName: string | null) => {
+  const emitProgress = (
+    fileIndexZeroBased: number,
+    fileName: string | null,
+    currentFilePercent?: number,
+  ) => {
     let sum = 0
     for (let w = 0; w < weight.length; w++) sum += weight[w]!
     const pct = Math.min(99, Math.round((sum / total) * 100))
@@ -241,6 +250,7 @@ export async function batchUploadFilesToAlbum(
       batchTotal: total,
       etaText,
       currentFileIndex: fileIndexZeroBased + 1,
+      currentFilePercent,
     })
   }
 
@@ -248,7 +258,7 @@ export async function batchUploadFilesToAlbum(
     const file = filesArray[fileIndex]!
 
     weight[fileIndex] = 0.05
-    emitProgress(fileIndex, file.name)
+    emitProgress(fileIndex, file.name, 5)
 
     let encryptedBlob: Blob
     try {
@@ -257,12 +267,12 @@ export async function batchUploadFilesToAlbum(
       failed.push(file.name)
       weight[fileIndex] = 0
       console.error('Encrypt failed for file:', file.name, e)
-      emitProgress(fileIndex, file.name)
+      emitProgress(fileIndex, file.name, 0)
       return
     }
 
     weight[fileIndex] = 0.1
-    emitProgress(fileIndex, file.name)
+    emitProgress(fileIndex, file.name, 12)
 
     try {
       const { uploadUrl, fileUrl } = await presignUpload(file.name)
@@ -270,7 +280,8 @@ export async function batchUploadFilesToAlbum(
       await putBlobToR2(encryptedBlob, uploadUrl, (loaded, tot) => {
         const frac = tot > 0 ? loaded / tot : 1
         weight[fileIndex] = 0.1 + frac * 0.85
-        emitProgress(fileIndex, file.name)
+        const filePct = Math.min(99, Math.round(12 + frac * 88))
+        emitProgress(fileIndex, file.name, filePct)
       })
 
       const { data, error: insertError } = await supabase
@@ -293,12 +304,12 @@ export async function batchUploadFilesToAlbum(
 
       fileIds[fileIndex] = data.id
       weight[fileIndex] = 1
-      emitProgress(fileIndex, file.name)
+      emitProgress(fileIndex, file.name, 100)
     } catch (e) {
       failed.push(file.name)
       weight[fileIndex] = 0
       console.error('Upload failed for file:', file.name, e)
-      emitProgress(fileIndex, file.name)
+      emitProgress(fileIndex, file.name, 0)
     }
   }
 
@@ -319,6 +330,7 @@ export async function batchUploadFilesToAlbum(
     batchTotal: total,
     etaText: null,
     currentFileIndex: 1,
+    currentFilePercent: 0,
   })
 
   await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, () => worker()))
@@ -330,6 +342,7 @@ export async function batchUploadFilesToAlbum(
     batchTotal: total,
     etaText: null,
     currentFileIndex: total,
+    currentFilePercent: 100,
   })
 
   return { failed, total, fileIds }

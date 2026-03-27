@@ -1617,6 +1617,85 @@ button {
   transition: width 0.12s ease;
 }
 
+.vault-upload-chip--queue {
+  max-height: min(70vh, 420px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.vault-upload-queue {
+  list-style: none;
+  margin: 0.65rem 0 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.vault-upload-queue__row {
+  margin: 0;
+}
+
+.vault-upload-queue__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.vault-upload-queue__name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.vault-upload-queue__pct {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.vault-upload-queue__failed {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.vault-upload-queue__bar {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.vault-upload-queue__bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(120, 180, 255, 0.95), rgba(255, 255, 255, 0.45));
+  transition: width 0.12s ease;
+}
+
+.vault-upload-queue__retry {
+  margin-top: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.78rem;
+  align-self: flex-start;
+}
+
+.vault-upload-queue__dismiss {
+  margin-top: 0.5rem;
+  width: 100%;
+}
+
 .vault-action-backdrop {
   z-index: 280;
   align-items: flex-end;
