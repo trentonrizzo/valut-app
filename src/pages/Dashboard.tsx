@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Outlet, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
@@ -12,11 +12,11 @@ import { CreateAlbumModal } from '../components/albums/CreateAlbumModal'
 import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
 import { AlbumCoverPickerModal } from '../components/albums/AlbumCoverPickerModal'
-import { MediaViewer } from '../components/files/MediaViewer'
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
 import { UploadProgressOverlay } from '../components/UploadProgressOverlay'
 import { batchUploadFilesToAlbum } from '../lib/batchUploadToAlbum'
 import { setDecryptedBlobUrlForFile } from '../lib/decryptedBlobCache'
+import { sortGalleryFiles, type FileSort } from '../lib/gallerySort'
 
 const GALLERY_COLS_KEY = 'vault-gallery-grid-cols'
 type GalleryCols = 1 | 2 | 3 | 4 | 5
@@ -54,7 +54,7 @@ function GridColsIcon({ cols }: { cols: number }) {
 export function Dashboard() {
   const { user } = useAuth()
   const { showToast } = useToast()
-  const { albumId: albumIdParam } = useParams<{ albumId?: string }>()
+  const { albumId: albumIdParam, fileId: mediaFileId } = useParams<{ albumId?: string; fileId?: string }>()
   const navigate = useNavigate()
   const openAlbumId = albumIdParam ?? null
 
@@ -99,10 +99,6 @@ export function Dashboard() {
   const uploadStartMsRef = useRef(0)
   const uploadTotalBytesRef = useRef(0)
 
-  const [viewerOpen, setViewerOpen] = useState(false)
-  const [viewerIndex, setViewerIndex] = useState(0)
-  const [viewerFileId, setViewerFileId] = useState<string | null>(null)
-
   const [fileActionTarget, setFileActionTarget] = useState<FileRow | null>(null)
   const [fileInfoTarget, setFileInfoTarget] = useState<FileRow | null>(null)
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -118,13 +114,6 @@ export function Dashboard() {
 
   const [columns, setColumns] = useState(3)
 
-  type FileSort =
-    | 'newest'
-    | 'oldest'
-    | 'largest'
-    | 'smallest'
-    | 'images_first'
-    | 'videos_first'
   const [fileSort, setFileSort] = useState<FileSort>('newest')
   const [galleryCols, setGalleryCols] = useState<GalleryCols>(loadGalleryCols)
 
@@ -195,90 +184,11 @@ export function Dashboard() {
     return albums.find((a) => a.id === openAlbumId) ?? null
   }, [albums, openAlbumId])
 
-  const displayFiles = useMemo(() => {
-    const list = [...files]
-    const byDateDesc = (a: FileRow, b: FileRow) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    const byDateAsc = (a: FileRow, b: FileRow) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-
-    switch (fileSort) {
-      case 'newest':
-        return list.sort(byDateDesc)
-      case 'oldest':
-        return list.sort(byDateAsc)
-      case 'largest':
-        return list.sort((a, b) => {
-          const sa = a.file_size_bytes
-          const sb = b.file_size_bytes
-          if (sa == null && sb == null) return byDateDesc(a, b)
-          if (sa == null) return 1
-          if (sb == null) return -1
-          if (sb !== sa) return sb - sa
-          return byDateDesc(a, b)
-        })
-      case 'smallest':
-        return list.sort((a, b) => {
-          const sa = a.file_size_bytes
-          const sb = b.file_size_bytes
-          if (sa == null && sb == null) return byDateDesc(a, b)
-          if (sa == null) return 1
-          if (sb == null) return -1
-          if (sa !== sb) return sa - sb
-          return byDateDesc(a, b)
-        })
-      case 'images_first':
-        return list.sort((a, b) => {
-          const va = isVideoFileName(a.file_name)
-          const vb = isVideoFileName(b.file_name)
-          if (va !== vb) return va ? 1 : -1
-          return byDateDesc(a, b)
-        })
-      case 'videos_first':
-        return list.sort((a, b) => {
-          const va = isVideoFileName(a.file_name)
-          const vb = isVideoFileName(b.file_name)
-          if (va !== vb) return va ? -1 : 1
-          return byDateDesc(a, b)
-        })
-      default:
-        return list.sort(byDateDesc)
-    }
-  }, [files, fileSort])
-
-  const mediaFiles = useMemo(
-    () =>
-      displayFiles.map((f) => ({
-        id: f.id,
-        file_url: f.file_url,
-        file_name: f.file_name,
-        created_at: f.created_at,
-        file_size_bytes: f.file_size_bytes,
-        is_encrypted: f.is_encrypted,
-      })),
-    [displayFiles],
-  )
+  const displayFiles = useMemo(() => sortGalleryFiles(files, fileSort), [files, fileSort])
 
   useEffect(() => {
-    setViewerOpen(false)
-    setViewerIndex(0)
-    setViewerFileId(null)
     setFileSort('newest')
   }, [albumIdParam])
-
-  useEffect(() => {
-    if (!viewerOpen || !viewerFileId) return
-    const ni = displayFiles.findIndex((f) => f.id === viewerFileId)
-    if (ni >= 0) setViewerIndex(ni)
-  }, [displayFiles, viewerOpen, viewerFileId])
-
-  useEffect(() => {
-    if (!viewerOpen) return
-    setViewerIndex((prev) => {
-      const max = Math.max(0, mediaFiles.length - 1)
-      return Math.max(0, Math.min(prev, max))
-    })
-  }, [viewerOpen, mediaFiles.length])
 
   useEffect(() => {
     if (!user) return
@@ -441,8 +351,12 @@ export function Dashboard() {
     albums.length === 0 ? 'No albums' : albums.length === 1 ? '1 album' : `${albums.length} albums`
 
   return (
-    <div className="dashboard">
-      <main className="dashboard__main">
+    <>
+      {mediaFileId && albumIdParam ? (
+        <Outlet />
+      ) : (
+        <div className="dashboard">
+          <main className="dashboard__main">
         {!openAlbumId ? (
           <>
             <div className="dashboard__toolbar">
@@ -699,7 +613,7 @@ export function Dashboard() {
                 } as CSSProperties
               }
             >
-              {displayFiles.map((f, i) => {
+              {displayFiles.map((f) => {
                 const isVideo = isVideoFileName(f.file_name)
 
                 return (
@@ -708,9 +622,8 @@ export function Dashboard() {
                       type="button"
                       className="vault-photo-tile"
                       onClick={() => {
-                        setViewerFileId(f.id)
-                        setViewerIndex(i)
-                        setViewerOpen(true)
+                        if (!openAlbumId) return
+                        navigate(`/albums/${openAlbumId}/media/${f.id}`, { state: { sort: fileSort } })
                       }}
                       onTouchStart={(e) => {
                         const t = e.touches[0]
@@ -876,25 +789,11 @@ export function Dashboard() {
               </div>
             ) : null}
 
-            <MediaViewer
-              key={viewerOpen ? 'viewer-open' : 'viewer-closed'}
-              open={viewerOpen}
-              userId={user?.id ?? ''}
-              files={mediaFiles}
-              index={viewerIndex}
-              onClose={() => {
-                setViewerOpen(false)
-                setViewerFileId(null)
-              }}
-              onIndexChange={(nextIndex) => {
-                setViewerIndex(nextIndex)
-                const nf = displayFiles[nextIndex]
-                if (nf) setViewerFileId(nf.id)
-              }}
-            />
           </section>
         )}
       </main>
+        </div>
+      )}
 
       <CreateAlbumModal
         open={createModalOpen}
@@ -930,6 +829,6 @@ export function Dashboard() {
           showToast('Cover removed')
         }}
       />
-    </div>
+    </>
   )
 }

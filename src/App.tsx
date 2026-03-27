@@ -7,6 +7,7 @@ import { Home } from './pages/Home'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Dashboard } from './pages/Dashboard'
+import { FullScreenMediaViewer } from './pages/FullScreenMediaViewer'
 import { Settings } from './pages/Settings'
 import { Upload } from './pages/Upload'
 
@@ -28,7 +29,9 @@ export default function App() {
               }
             >
               <Route path="albums" element={<Dashboard />} />
-              <Route path="albums/:albumId" element={<Dashboard />} />
+              <Route path="albums/:albumId" element={<Dashboard />}>
+                <Route path="media/:fileId" element={<FullScreenMediaViewer />} />
+              </Route>
               <Route path="upload" element={<Upload />} />
               <Route path="settings" element={<Settings />} />
             </Route>
