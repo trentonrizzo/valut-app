@@ -14,7 +14,7 @@ import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbum
 import { AlbumCoverPickerModal } from '../components/albums/AlbumCoverPickerModal'
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
 import { UploadProgressOverlay } from '../components/UploadProgressOverlay'
-import { batchUploadFilesToAlbum } from '../lib/batchUploadToAlbum'
+import { batchUploadFilesToAlbum, validateUploadFileSizes } from '../lib/batchUploadToAlbum'
 import { setDecryptedBlobUrlForFile } from '../lib/decryptedBlobCache'
 import { sortGalleryFiles, type FileSort } from '../lib/gallerySort'
 
@@ -98,6 +98,7 @@ export function Dashboard() {
   const [uploadEtaText, setUploadEtaText] = useState<string | null>(null)
   const uploadStartMsRef = useRef(0)
   const uploadTotalBytesRef = useRef(0)
+  const uploadLockRef = useRef(false)
 
   const [fileActionTarget, setFileActionTarget] = useState<FileRow | null>(null)
   const [fileInfoTarget, setFileInfoTarget] = useState<FileRow | null>(null)
@@ -481,11 +482,14 @@ export function Dashboard() {
                       const filesArray = Array.from(list)
                       void (async () => {
                         if (filesArray.length === 0) return
+                        if (uploading || uploadLockRef.current) return
                         if (!user) {
                           showToast('Please sign in to upload.', 'error')
                           return
                         }
+                        if (!validateUploadFileSizes(filesArray)) return
 
+                        uploadLockRef.current = true
                         const optimisticUrls: string[] = []
                         const optimisticRows: FileRow[] = filesArray.map((f) => {
                           const url = URL.createObjectURL(f)
@@ -566,9 +570,11 @@ export function Dashboard() {
                         } catch (err) {
                           optimisticUrls.forEach((u) => URL.revokeObjectURL(u))
                           setFiles((prev) => prev.filter((row) => !row.id.startsWith('optimistic-')))
-                          showToast(err instanceof Error ? err.message : 'Upload failed', 'error')
                           console.error(err)
+                          globalThis.alert('Upload failed. Try again.')
+                          showToast(err instanceof Error ? err.message : 'Upload failed', 'error')
                         } finally {
+                          uploadLockRef.current = false
                           setUploading(false)
                           setUploadProgress(0)
                           setUploadFileName(null)

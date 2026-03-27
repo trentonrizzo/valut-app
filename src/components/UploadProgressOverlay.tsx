@@ -26,19 +26,27 @@ export function UploadProgressOverlay({
         aria-labelledby="upload-progress-title"
         onClick={(ev) => ev.stopPropagation()}
       >
-        <p id="upload-progress-title" className="vault-upload-chip__meta">
+        <p id="upload-progress-title" className="vault-upload-chip__status">
           {uploadBatchTotal > 0 ? (
-            <span className="vault-upload-chip__batch">
-              {uploadBatchIndex} of {uploadBatchTotal}
-            </span>
-          ) : null}
-          {uploadBatchTotal > 0 ? <span className="vault-upload-chip__sep"> · </span> : null}
+            <>
+              Uploading {uploadBatchIndex} of {uploadBatchTotal}…
+            </>
+          ) : (
+            'Uploading…'
+          )}
+        </p>
+        <p className="vault-upload-chip__meta">
           <span>{uploadProgress}%</span>
+          {uploadEtaText ? (
+            <>
+              <span className="vault-upload-chip__sep"> · </span>
+              <span className="vault-upload-chip__eta-inline">{uploadEtaText}</span>
+            </>
+          ) : null}
         </p>
         <p className="vault-upload-chip__name" title={uploadFileName ?? undefined}>
           {uploadFileName ?? 'File'}
         </p>
-        {uploadEtaText ? <p className="vault-upload-chip__eta">{uploadEtaText}</p> : null}
         <div className="vault-upload-chip__bar" aria-label="Upload progress">
           <div className="vault-upload-chip__bar-fill" style={{ width: `${uploadProgress}%` }} />
         </div>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { fetchAlbumsWithCounts } from '../lib/albumQueries'
-import { batchUploadFilesToAlbum } from '../lib/batchUploadToAlbum'
+import { batchUploadFilesToAlbum, validateUploadFileSizes } from '../lib/batchUploadToAlbum'
 import type { AlbumWithMeta } from '../types/album'
 import { UploadProgressOverlay } from '../components/UploadProgressOverlay'
 
@@ -22,6 +22,7 @@ export function Upload() {
   const [uploadEtaText, setUploadEtaText] = useState<string | null>(null)
   const uploadStartMsRef = useRef(0)
   const uploadTotalBytesRef = useRef(0)
+  const uploadLockRef = useRef(false)
 
   const refreshAlbums = useCallback(async () => {
     if (!user) return
@@ -61,7 +62,10 @@ export function Upload() {
       return
     }
     if (filesArray.length === 0) return
+    if (uploading || uploadLockRef.current) return
+    if (!validateUploadFileSizes(filesArray)) return
 
+    uploadLockRef.current = true
     setUploading(true)
     setUploadProgress(0)
     setUploadFileName(filesArray[0].name)
@@ -97,9 +101,11 @@ export function Upload() {
         )
       }
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Upload failed', 'error')
       console.error(e)
+      globalThis.alert('Upload failed. Try again.')
+      showToast(e instanceof Error ? e.message : 'Upload failed', 'error')
     } finally {
+      uploadLockRef.current = false
       setUploading(false)
       setUploadProgress(0)
       setUploadFileName(null)
