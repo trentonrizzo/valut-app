@@ -436,6 +436,41 @@ button {
   gap: 1.25rem;
 }
 
+.album-grid__item {
+  min-width: 0;
+}
+
+.album-card__drag-slot {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  left: 8px;
+}
+
+.album-card__drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(0, 0, 0, 0.45);
+  cursor: grab;
+  touch-action: none;
+}
+
+.album-card__drag-handle:hover {
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.album-card__drag-handle:active {
+  cursor: grabbing;
+}
+
 .album-card {
   position: relative;
   background: linear-gradient(180deg, #141414 0%, #101010 100%);

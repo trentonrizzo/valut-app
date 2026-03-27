@@ -25,18 +25,21 @@ export interface Database {
           user_id: string
           name: string
           created_at: string
+          order_index: number
         }
         Insert: {
           id?: string
           user_id: string
           name: string
           created_at?: string
+          order_index?: number
         }
         Update: {
           id?: string
           user_id?: string
           name?: string
           created_at?: string
+          order_index?: number
         }
         Relationships: [
           {

@@ -16,10 +16,12 @@ create table if not exists public.albums (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles (id) on delete cascade,
   name text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  order_index integer not null default 0
 );
 
 create index if not exists albums_user_id_idx on public.albums (user_id);
+create index if not exists albums_user_order_idx on public.albums (user_id, order_index);
 
 -- Items (for future uploads)
 create table if not exists public.items (

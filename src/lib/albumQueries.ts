@@ -15,7 +15,7 @@ export async function fetchAlbumsWithCounts(userId: string) {
     .from('albums')
     .select('*, files(count)')
     .eq('user_id', userId)
-    .order('created_at', { ascending: false })
+    .order('order_index', { ascending: true })
 
   if (!primary.error && primary.data) {
     const rows = primary.data as RowWithCount[]
@@ -26,7 +26,7 @@ export async function fetchAlbumsWithCounts(userId: string) {
     .from('albums')
     .select('*')
     .eq('user_id', userId)
-    .order('created_at', { ascending: false })
+    .order('order_index', { ascending: true })
 
   if (fallback.error) {
     return { data: null as AlbumWithMeta[] | null, error: fallback.error.message }

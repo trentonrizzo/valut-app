@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { AlbumWithMeta } from '../../types/album'
 import { AlbumCardMenu } from './AlbumCardMenu'
 
@@ -27,20 +28,25 @@ type Props = {
   album: AlbumWithMeta
   busy?: boolean
   active?: boolean
+  /** Drag handle (e.g. sortable listeners); clicks do not open the album */
+  dragHandle?: ReactNode
   onOpen: (album: AlbumWithMeta) => void
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
 }
 
-export function AlbumCard({ album, busy, active, onOpen, onRename, onDelete }: Props) {
+export function AlbumCard({ album, busy, active, dragHandle, onOpen, onRename, onDelete }: Props) {
   const created = formatAlbumDate(album.created_at)
+
+  function openIfNotHandle(e: React.MouseEvent | React.KeyboardEvent) {
+    if ('target' in e && (e.target as HTMLElement).closest('.album-card__drag-slot')) return
+    if (!busy) onOpen(album)
+  }
 
   return (
     <article
       className={`album-card album-card--interactive ${busy ? 'album-card--busy' : ''} ${active ? 'album-card--active' : ''}`}
-      onClick={() => {
-        if (!busy) onOpen(album)
-      }}
+      onClick={(e) => openIfNotHandle(e)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -52,6 +58,7 @@ export function AlbumCard({ album, busy, active, onOpen, onRename, onDelete }: P
       aria-label={`Open album ${album.name}`}
     >
       <div className="album-card__thumb">
+        {dragHandle ? <div className="album-card__drag-slot">{dragHandle}</div> : null}
         <div className="album-card__thumb-inner" aria-hidden>
           <svg viewBox="0 0 48 48" className="album-card__icon">
             <rect

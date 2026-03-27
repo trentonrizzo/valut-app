@@ -114,8 +114,7 @@ export function Dashboard() {
     longPressTouchStartRef.current = null
   }, [])
 
-  type AlbumSort = 'newest' | 'oldest' | 'az' | 'za'
-  const [albumSort, setAlbumSort] = useState<AlbumSort>('newest')
+  const [columns, setColumns] = useState(3)
 
   type FileSort =
     | 'newest'
@@ -158,24 +157,26 @@ export function Dashboard() {
     setAlbums(data ?? [])
   }, [user])
 
-  const sortedAlbums = useMemo(() => {
-    const list = [...albums]
-    switch (albumSort) {
-      case 'az':
-        return list.sort((a, b) => a.name.localeCompare(b.name))
-      case 'za':
-        return list.sort((a, b) => b.name.localeCompare(a.name))
-      case 'oldest':
-        return list.sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-        )
-      case 'newest':
-      default:
-        return list.sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-        )
-    }
-  }, [albums, albumSort])
+  const persistAlbumOrder = useCallback(
+    async (reordered: AlbumWithMeta[]) => {
+      const rows = reordered
+        .map((album, index) => ({ id: album.id, order_index: index }))
+        .filter((row) => !String(row.id).startsWith('optimistic-'))
+      if (rows.length === 0) return
+      const { error } = await supabase.from('albums').upsert(rows, { onConflict: 'id' })
+      if (error) showToast(error.message, 'error')
+    },
+    [showToast],
+  )
+
+  const handleAlbumReorder = useCallback(
+    (next: AlbumWithMeta[]) => {
+      const withIndex = next.map((a, i) => ({ ...a, order_index: i }))
+      setAlbums(withIndex)
+      void persistAlbumOrder(withIndex)
+    },
+    [persistAlbumOrder],
+  )
 
   const openAlbum = useMemo(() => {
     if (!openAlbumId) return null
@@ -330,21 +331,24 @@ export function Dashboard() {
     if (!user) throw new Error('Not signed in.')
 
     const tempId = `optimistic-${crypto.randomUUID()}`
+    const maxOrder = albums.reduce((m, a) => Math.max(m, a.order_index ?? 0), -1)
+    const nextOrder = maxOrder + 1
     const optimistic: AlbumWithMeta = {
       id: tempId,
       user_id: user.id,
       name,
       created_at: new Date().toISOString(),
       itemCount: 0,
+      order_index: nextOrder,
     }
 
-    setAlbums((prev) => [optimistic, ...prev])
+    setAlbums((prev) => [...prev, optimistic])
     setCreatingAlbum(true)
 
     try {
       const { data, error } = await supabase
         .from('albums')
-        .insert({ user_id: user.id, name })
+        .insert({ user_id: user.id, name, order_index: nextOrder })
         .select()
         .single()
 
@@ -408,9 +412,7 @@ export function Dashboard() {
       showToast('Album deleted')
     } catch (e) {
       setAlbums((prev) =>
-        [...prev, removed].sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-        ),
+        [...prev, removed].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)),
       )
       showToast(e instanceof Error ? e.message : 'Could not delete album', 'error')
     }
@@ -449,16 +451,20 @@ export function Dashboard() {
                 </p>
               </div>
               <div className="dashboard__toolbar-actions">
-                <select
-                  className="vault-sort-select"
-                  value={albumSort}
-                  onChange={(e) => setAlbumSort(e.target.value as AlbumSort)}
-                >
-                  <option value="newest">Newest</option>
-                  <option value="oldest">Oldest</option>
-                  <option value="az">A–Z</option>
-                  <option value="za">Z–A</option>
-                </select>
+                <div className="vault-grid-cols" role="toolbar" aria-label="Album grid columns">
+                  {([1, 2, 3, 4, 5] as const).map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={`vault-grid-cols__btn ${columns === n ? 'is-active' : ''}`}
+                      onClick={() => setColumns(n)}
+                      aria-pressed={columns === n}
+                      title={`${n} column${n === 1 ? '' : 's'}`}
+                    >
+                      <GridColsIcon cols={n} />
+                    </button>
+                  ))}
+                </div>
                 <button
                   type="button"
                   className="btn btn--primary"
@@ -484,13 +490,15 @@ export function Dashboard() {
               </div>
             ) : (
               <AlbumGrid
-                albums={sortedAlbums}
+                albums={albums}
+                columns={columns}
                 busyAlbumIds={busyIds}
                 activeAlbumId={openAlbumId}
                 onOpen={(album) => setOpenAlbumId(album.id)}
                 onRename={(a) => setRenameTarget(a)}
                 onDelete={(a) => setDeleteTarget(a)}
                 onCreateClick={() => setCreateModalOpen(true)}
+                onReorder={handleAlbumReorder}
               />
             )}
           </>
