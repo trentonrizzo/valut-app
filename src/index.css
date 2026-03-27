@@ -468,6 +468,8 @@ button {
 
 .album-grid__item {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .album-card__drag-slot {
@@ -503,6 +505,12 @@ button {
 
 .album-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  /* Card height from width; inner flex splits ~75% / 25% between preview and meta */
+  aspect-ratio: 4 / 5;
   background: linear-gradient(180deg, #141414 0%, #101010 100%);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -547,7 +555,8 @@ button {
 .album-card__thumb {
   position: relative;
   isolation: isolate;
-  aspect-ratio: 16 / 10;
+  flex: 3 1 0;
+  min-height: 0;
   background: linear-gradient(155deg, #1c1c1c 0%, #0a0a0a 55%, #121212 100%);
   display: flex;
   align-items: center;
@@ -606,19 +615,25 @@ button {
 }
 
 .album-card__body {
-  padding: 1rem 1.15rem 1.2rem;
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0.45rem 0.6rem 0.5rem;
   text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.12rem;
 }
 
 .album-card__title {
-  font-size: 1.02rem;
+  font-size: 0.94rem;
   font-weight: 600;
-  margin-bottom: 0.35rem;
+  margin: 0;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  line-height: 1.25;
+  line-height: 1.22;
   letter-spacing: -0.02em;
   word-break: break-word;
 }
@@ -626,13 +641,14 @@ button {
 .album-card__stats {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.06rem;
   min-width: 0;
 }
 
 .album-card__stats-line {
-  font-size: 0.78rem;
-  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.2;
+  color: var(--text-faint);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -832,7 +848,9 @@ button {
 }
 
 .album-skeleton-card {
-  height: 220px;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  min-height: 180px;
   border-radius: 14px;
   background: linear-gradient(90deg, #141414 0%, #1a1a1a 50%, #141414 100%);
   background-size: 200% 100%;
