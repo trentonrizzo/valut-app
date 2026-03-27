@@ -1003,6 +1003,108 @@ button {
   margin-top: 0;
 }
 
+.modal-backdrop--portal {
+  z-index: 99990;
+}
+
+.album-cover-picker__actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.album-cover-picker__action-btn {
+  font-size: 0.85rem;
+  padding: 0.65rem 0.5rem;
+}
+
+.album-cover-picker__action-btn--danger {
+  grid-column: 1 / -1;
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.album-cover-picker__toolbar {
+  margin-bottom: 0.5rem;
+}
+
+.album-cover-picker__back {
+  padding: 0.35rem 0.5rem;
+  font-size: 0.88rem;
+}
+
+.album-cover-picker__purpose {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  margin-top: 0.15rem;
+}
+
+.album-cover-picker__upload-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 12px;
+  z-index: 5;
+}
+
+.album-cover-picker {
+  position: relative;
+}
+
+.album-cover-picker__upload-box {
+  width: min(100%, 280px);
+  padding: 1rem;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.95);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.album-cover-picker__upload-label {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.album-cover-picker__upload-name {
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.album-cover-picker__progress {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.album-cover-picker__progress span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #34d399, #6ee7b7);
+  border-radius: 999px;
+  transition: width 0.18s ease;
+}
+
+.album-card__thumb-video-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.album-menu__dropdown--portal {
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.65);
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

@@ -72,6 +72,11 @@ export function Dashboard() {
     file_url: string
     created_at: string
     file_size_bytes?: number | null
+    purpose?: string | null
+  }
+
+  function isGalleryFile(f: FileRow): boolean {
+    return f.purpose !== 'cover'
   }
 
   const [files, setFiles] = useState<FileRow[]>([])
@@ -312,7 +317,10 @@ export function Dashboard() {
           .order('created_at', { ascending: false })
 
         if (error) throw new Error(error.message)
-        if (!cancelled) setFiles((data as FileRow[]) ?? [])
+        if (!cancelled) {
+          const rows = (data as FileRow[]) ?? []
+          setFiles(rows.filter(isGalleryFile))
+        }
       } catch (e) {
         if (cancelled) return
         setFiles([])
@@ -418,25 +426,6 @@ export function Dashboard() {
     }
   }
 
-  async function handleRemoveAlbumCover(album: AlbumWithMeta) {
-    if (!user) return
-    setBusy(album.id, true)
-    try {
-      const { error } = await supabase
-        .from('albums')
-        .update({ cover_file_id: null })
-        .eq('id', album.id)
-        .eq('user_id', user.id)
-      if (error) throw new Error(error.message)
-      await refreshAlbums()
-      showToast('Cover removed')
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Could not remove cover', 'error')
-    } finally {
-      setBusy(album.id, false)
-    }
-  }
-
   const albumCountLabel =
     albums.length === 0 ? 'No albums' : albums.length === 1 ? '1 album' : `${albums.length} albums`
 
@@ -500,7 +489,6 @@ export function Dashboard() {
                 onRename={(a) => setRenameTarget(a)}
                 onDelete={(a) => setDeleteTarget(a)}
                 onSetCover={(a) => setCoverPickerAlbum(a)}
-                onRemoveCover={(a) => void handleRemoveAlbumCover(a)}
                 onCreateClick={() => setCreateModalOpen(true)}
                 onReorder={handleAlbumReorder}
               />
@@ -603,7 +591,8 @@ export function Dashboard() {
 
                           if (selectError) throw new Error(selectError.message)
 
-                          setFiles((data as FileRow[]) ?? [])
+                          const rows = (data as FileRow[]) ?? []
+                          setFiles(rows.filter(isGalleryFile))
                           await refreshAlbums()
 
                           if (failed.length === 0) {

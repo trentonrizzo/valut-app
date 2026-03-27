@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { AlbumWithMeta } from '../../types/album'
 import { formatBytes } from '../../lib/formatBytes'
+import { AlbumCardCoverVideo } from './AlbumCardCoverVideo'
 import { AlbumCardMenu } from './AlbumCardMenu'
 
 function formatItemCount(n: number): string {
@@ -19,7 +20,6 @@ type Props = {
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
   onSetCover?: (album: AlbumWithMeta) => void
-  onRemoveCover?: (album: AlbumWithMeta) => void
 }
 
 export function AlbumCard({
@@ -31,7 +31,6 @@ export function AlbumCard({
   onRename,
   onDelete,
   onSetCover,
-  onRemoveCover,
 }: Props) {
   function openIfNotHandle(e: React.MouseEvent | React.KeyboardEvent) {
     if ('target' in e) {
@@ -61,13 +60,7 @@ export function AlbumCard({
           <div className="album-card__thumb-inner album-card__thumb-inner--media">
             {album.previewIsVideo ? (
               <>
-                <video
-                  className="album-card__thumb-img"
-                  src={album.previewUrl}
-                  muted
-                  playsInline
-                  preload="metadata"
-                />
+                <AlbumCardCoverVideo src={album.previewUrl} className="album-card__thumb-img" />
                 <span className="album-card__video-badge" aria-hidden>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M8 5v14l11-7L8 5z" />
@@ -107,11 +100,8 @@ export function AlbumCard({
           albumId={album.id}
           disabled={busy}
           onRename={() => onRename(album)}
-          onDelete={() => onDelete(album)}
           onSetCover={onSetCover ? () => onSetCover(album) : undefined}
-          onRemoveCover={onRemoveCover ? () => onRemoveCover(album) : undefined}
-          canSetCover={album.itemCount > 0}
-          hasCustomCover={album.cover_file_id != null}
+          onDelete={() => onDelete(album)}
         />
       </div>
       <div className="album-card__body">

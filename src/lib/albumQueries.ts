@@ -10,15 +10,26 @@ export type FileRowForAlbumMeta = {
   file_url: string
   created_at: string
   file_size_bytes: number | null
+  /** 'content' | 'cover'; missing/null treated as content */
+  purpose: string | null
 }
 
-function sumFileBytes(files: FileRowForAlbumMeta[]): number {
+export function isContentFile(f: FileRowForAlbumMeta): boolean {
+  return f.purpose !== 'cover'
+}
+
+function sumContentFileBytes(files: FileRowForAlbumMeta[]): number {
   let sum = 0
   for (const f of files) {
+    if (!isContentFile(f)) continue
     const n = f.file_size_bytes
-    if (n != null && Number.isFinite(n) && n > 0) sum += n
+    if (n != null && Number.isFinite(n) && n >= 0) sum += n
   }
   return sum
+}
+
+function countContentFiles(files: FileRowForAlbumMeta[]): number {
+  return files.reduce((n, f) => (isContentFile(f) ? n + 1 : n), 0)
 }
 
 function pickNewest(files: FileRowForAlbumMeta[]): FileRowForAlbumMeta | null {
@@ -32,14 +43,16 @@ function previewForAlbum(album: AlbumRow, byAlbum: Map<string, FileRowForAlbumMe
   previewUrl: string | null
   previewIsVideo: boolean
 } {
-  const list = byAlbum.get(album.id) ?? []
+  const all = byAlbum.get(album.id) ?? []
+  const contentOnly = all.filter(isContentFile)
+
   let file: FileRowForAlbumMeta | null = null
 
   if (album.cover_file_id) {
-    file = list.find((f) => f.id === album.cover_file_id) ?? null
+    file = all.find((f) => f.id === album.cover_file_id) ?? null
   }
   if (!file) {
-    file = pickNewest(list)
+    file = pickNewest(contentOnly)
   }
 
   if (!file) {
@@ -54,7 +67,8 @@ function previewForAlbum(album: AlbumRow, byAlbum: Map<string, FileRowForAlbumMe
 
 /**
  * Build album metadata from album rows and all files for the user.
- * Stats and previews are derived from real file rows only (no placeholder counts).
+ * Item count and storage use only purpose=content (legacy rows without purpose count as content).
+ * Preview uses custom cover when set, else newest content file.
  */
 export function buildAlbumsWithMeta(
   albums: AlbumRow[],
@@ -72,8 +86,8 @@ export function buildAlbumsWithMeta(
     const { previewUrl, previewIsVideo } = previewForAlbum(album, byAlbum)
     return {
       ...album,
-      itemCount: list.length,
-      totalBytes: sumFileBytes(list),
+      itemCount: countContentFiles(list),
+      totalBytes: sumContentFileBytes(list),
       previewUrl,
       previewIsVideo,
     }
@@ -95,7 +109,7 @@ export async function fetchAlbumsWithCounts(userId: string) {
 
   const filesRes = await supabase
     .from('files')
-    .select('id, album_id, file_name, file_url, created_at, file_size_bytes')
+    .select('id, album_id, file_name, file_url, created_at, file_size_bytes, purpose')
     .eq('user_id', userId)
 
   if (filesRes.error) {

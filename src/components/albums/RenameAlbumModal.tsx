@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 
 type Props = {
   open: boolean
@@ -45,9 +46,9 @@ export function RenameAlbumModal({ open, initialName, onClose, onRename }: Props
     }
   }
 
-  return (
+  const node = (
     <div
-      className="modal-backdrop modal-backdrop--mobile-safe"
+      className="modal-backdrop modal-backdrop--mobile-safe modal-backdrop--portal"
       role="presentation"
       onClick={() => {
         if (!submitting) onClose()
@@ -99,4 +100,6 @@ export function RenameAlbumModal({ open, initialName, onClose, onRename }: Props
       </div>
     </div>
   )
+
+  return typeof document !== 'undefined' ? createPortal(node, document.body) : null
 }

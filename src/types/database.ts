@@ -63,6 +63,7 @@ export interface Database {
           file_url: string
           created_at: string
           file_size_bytes: number | null
+          purpose: string
         }
         Insert: {
           id?: string
@@ -72,6 +73,7 @@ export interface Database {
           file_url: string
           created_at?: string
           file_size_bytes?: number | null
+          purpose?: string
         }
         Update: {
           id?: string
@@ -81,6 +83,7 @@ export interface Database {
           file_url?: string
           created_at?: string
           file_size_bytes?: number | null
+          purpose?: string
         }
         Relationships: [
           {

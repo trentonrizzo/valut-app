@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 type Props = {
   open: boolean
@@ -25,9 +26,9 @@ export function ConfirmDeleteAlbumModal({ open, albumName, onClose, onConfirm }:
     }
   }
 
-  return (
+  const node = (
     <div
-      className="modal-backdrop modal-backdrop--mobile-safe"
+      className="modal-backdrop modal-backdrop--mobile-safe modal-backdrop--portal"
       role="presentation"
       onClick={() => {
         if (!busy) onClose()
@@ -64,4 +65,6 @@ export function ConfirmDeleteAlbumModal({ open, albumName, onClose, onConfirm }:
       </div>
     </div>
   )
+
+  return typeof document !== 'undefined' ? createPortal(node, document.body) : null
 }
