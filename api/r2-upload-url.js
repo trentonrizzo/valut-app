@@ -8,6 +8,7 @@ const s3 = new S3Client({
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   },
+  forcePathStyle: true,
 });
 
 function sanitizeFileName(input) {
@@ -44,10 +45,10 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: false, error: "fileName is required" });
     }
 
-    const bucket = process.env.R2_BUCKET;
-    const publicBase = String(process.env.R2_PUBLIC_URL || "").replace(/\/+$/, "");
+    const bucket =
+      process.env.R2_BUCKET || process.env.R2_BUCKET_NAME || "vault-storage";
 
-    if (!bucket || !publicBase) {
+    if (!bucket) {
       return res.status(200).json({ ok: false, error: "R2 is not configured" });
     }
 
@@ -61,7 +62,8 @@ export default async function handler(req, res) {
     });
 
     const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 60 });
-    const fileUrl = `${publicBase}/${key}`;
+    /** DB stores object key only; reads use signed GET URLs. */
+    const fileUrl = key;
 
     return res.status(200).json({ ok: true, uploadUrl, fileUrl, key });
   } catch (err) {

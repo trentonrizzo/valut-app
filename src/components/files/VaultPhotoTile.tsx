@@ -70,23 +70,31 @@ function VideoTilePoster({ src }: { src: string }) {
 }
 
 export function VaultPhotoTileMedia({ file, userId }: Props) {
-  const src = useDecryptedMediaSrc(
+  const { displayUrl, loading, failed } = useDecryptedMediaSrc(
     file.file_url,
     file.is_encrypted,
     userId,
     file.file_name,
     file.id,
   )
-  const displaySrc = src ?? (file.is_encrypted === true ? undefined : file.file_url)
   const isVideo = isVideoFileName(file.file_name)
 
-  if (!displaySrc) {
-    return <div className="vault-photo-tile__media vault-photo-tile__media--pending" aria-hidden />
+  if (loading) {
+    return <div className="vault-photo-tile__media vault-photo-tile__media--skeleton" aria-hidden />
+  }
+
+  if (failed || !displayUrl) {
+    return (
+      <div
+        className="vault-photo-tile__media vault-photo-tile__media--failed"
+        aria-label="Could not load media"
+      />
+    )
   }
 
   return isVideo ? (
-    <VideoTilePoster key={displaySrc} src={displaySrc} />
+    <VideoTilePoster key={displayUrl} src={displayUrl} />
   ) : (
-    <img className="vault-photo-tile__thumb-img" src={displaySrc} alt="" loading="lazy" />
+    <img className="vault-photo-tile__thumb-img" src={displayUrl} alt="" loading="lazy" />
   )
 }

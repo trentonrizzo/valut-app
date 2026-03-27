@@ -30,22 +30,25 @@ function CoverPickerThumb({
   isVid: boolean
   fileId: string
 }) {
-  const src = useDecryptedMediaSrc(fileUrl, isEncrypted, userId, fileName, fileId)
-  const mediaSrc = src ?? (!isEncrypted ? fileUrl : null)
+  const { displayUrl, loading, failed } = useDecryptedMediaSrc(fileUrl, isEncrypted, userId, fileName, fileId)
   return (
     <span className="album-cover-picker__thumb">
-      {isVid ? (
+      {loading ? (
+        <span className="album-cover-picker__thumb-skeleton" aria-hidden />
+      ) : failed || !displayUrl ? (
+        <span className="album-cover-picker__thumb-failed" aria-hidden />
+      ) : isVid ? (
         <>
-          {mediaSrc ? <video src={mediaSrc} muted playsInline preload="metadata" /> : null}
+          <video src={displayUrl} muted playsInline preload="metadata" />
           <span className="album-cover-picker__thumb-badge" aria-hidden>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7L8 5z" />
             </svg>
           </span>
         </>
-      ) : mediaSrc ? (
-        <img src={mediaSrc} alt="" loading="lazy" />
-      ) : null}
+      ) : (
+        <img src={displayUrl} alt="" loading="lazy" />
+      )}
     </span>
   )
 }

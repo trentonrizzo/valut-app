@@ -39,18 +39,20 @@ function SlideImage({
   file: FileRow
   userId: string
 }) {
-  const src = useDecryptedMediaSrc(
+  const { displayUrl, loading, failed } = useDecryptedMediaSrc(
     file.file_url,
     file.is_encrypted,
     userId,
     file.file_name,
     file.id,
   )
-  const displaySrc = src ?? (file.is_encrypted === true ? undefined : file.file_url)
-  if (!displaySrc) {
+  if (loading) {
     return <div className="fs-media-viewer__loading" aria-busy />
   }
-  return <img className="fs-media-viewer__photo" src={displaySrc} alt="" draggable={false} />
+  if (failed || !displayUrl) {
+    return <div className="fs-media-viewer__failed" aria-label="Could not load image" />
+  }
+  return <img className="fs-media-viewer__photo" src={displayUrl} alt="" draggable={false} />
 }
 
 function SlideVideo({
@@ -66,25 +68,24 @@ function SlideVideo({
   playbackRate: number
   loop: boolean
 }) {
-  const src = useDecryptedMediaSrc(
+  const { displayUrl, loading, failed } = useDecryptedMediaSrc(
     file.file_url,
     file.is_encrypted,
     userId,
     file.file_name,
     file.id,
   )
-  const displaySrc = src ?? (file.is_encrypted === true ? undefined : file.file_url)
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   useEffect(() => {
     const el = videoRef.current
-    if (!el || !displaySrc) return
+    if (!el || !displayUrl) return
     el.playbackRate = playbackRate
-  }, [displaySrc, playbackRate])
+  }, [displayUrl, playbackRate])
 
   useEffect(() => {
     const el = videoRef.current
-    if (!el || !displaySrc) return
+    if (!el || !displayUrl) return
     if (isActive) {
       el.loop = loop
       el.muted = false
@@ -96,10 +97,13 @@ function SlideVideo({
       el.pause()
       el.currentTime = 0
     }
-  }, [isActive, displaySrc, loop])
+  }, [isActive, displayUrl, loop])
 
-  if (!displaySrc) {
+  if (loading) {
     return <div className="fs-media-viewer__loading" aria-busy />
+  }
+  if (failed || !displayUrl) {
+    return <div className="fs-media-viewer__failed" aria-label="Could not load video" />
   }
 
   return (
@@ -107,7 +111,7 @@ function SlideVideo({
       <video
         ref={videoRef}
         className="fs-media-viewer__video"
-        src={displaySrc}
+        src={displayUrl}
         controls
         playsInline
         preload="metadata"
@@ -151,15 +155,13 @@ export function FullScreenMediaViewer() {
   const currentFile = index >= 0 ? displayFiles[index] : null
   const currentIsVideo = currentFile ? isVideo(currentFile.file_name) : false
 
-  const downloadBlobUrl = useDecryptedMediaSrc(
+  const { downloadUrl: downloadHref } = useDecryptedMediaSrc(
     currentFile?.file_url ?? null,
     currentFile?.is_encrypted,
     user?.id ?? null,
     currentFile?.file_name ?? '',
     currentFile?.id,
   )
-  const downloadHref =
-    downloadBlobUrl ?? (currentFile?.is_encrypted === true ? undefined : currentFile?.file_url)
 
   useEffect(() => {
     if (!user || !albumId) return

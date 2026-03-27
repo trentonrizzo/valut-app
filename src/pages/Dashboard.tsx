@@ -17,6 +17,7 @@ import { UploadQueueOverlay, type UploadQueueItem } from '../components/UploadQu
 import { batchUploadFilesToAlbum, validateUploadFileSizes } from '../lib/batchUploadToAlbum'
 import { setDecryptedBlobUrlForFile } from '../lib/decryptedBlobCache'
 import { sortGalleryFiles, type FileSort } from '../lib/gallerySort'
+import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
 
 const GALLERY_COLS_KEY = 'vault-gallery-grid-cols'
 type GalleryCols = 1 | 2 | 3 | 4 | 5
@@ -107,6 +108,14 @@ export function Dashboard() {
 
   const [fileActionTarget, setFileActionTarget] = useState<FileRow | null>(null)
   const [fileInfoTarget, setFileInfoTarget] = useState<FileRow | null>(null)
+
+  const fileActionMedia = useDecryptedMediaSrc(
+    fileActionTarget?.file_url ?? null,
+    fileActionTarget?.is_encrypted,
+    user?.id ?? null,
+    fileActionTarget?.file_name ?? '',
+    fileActionTarget?.id,
+  )
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressTouchStartRef = useRef<{ x: number; y: number } | null>(null)
 
@@ -865,17 +874,29 @@ export function Dashboard() {
                   <div className="vault-action-sheet__list">
                     <a
                       className="vault-action-sheet__item"
-                      href={fileActionTarget.file_url}
+                      href={fileActionMedia.downloadUrl ?? '#'}
                       download={fileActionTarget.file_name}
-                      onClick={() => setFileActionTarget(null)}
+                      aria-disabled={fileActionMedia.loading || !fileActionMedia.downloadUrl}
+                      onClick={(e) => {
+                        if (fileActionMedia.loading || !fileActionMedia.downloadUrl) {
+                          e.preventDefault()
+                          return
+                        }
+                        setFileActionTarget(null)
+                      }}
                     >
-                      Download
+                      {fileActionMedia.loading ? 'Preparing download…' : 'Download'}
                     </a>
                     <button
                       type="button"
                       className="vault-action-sheet__item"
+                      disabled={fileActionMedia.loading || !fileActionMedia.downloadUrl}
                       onClick={async () => {
-                        const url = fileActionTarget.file_url
+                        const url = fileActionMedia.downloadUrl
+                        if (!url) {
+                          showToast('Link not ready yet', 'error')
+                          return
+                        }
                         try {
                           await navigator.clipboard.writeText(url)
                           showToast('Link copied')

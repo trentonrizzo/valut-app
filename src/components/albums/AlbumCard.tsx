@@ -35,13 +35,14 @@ export function AlbumCard({
   onDelete,
   onSetCover,
 }: Props) {
-  const previewSrc = useDecryptedMediaSrc(
-    album.previewUrl,
-    album.previewIsEncrypted,
-    userId,
-    album.previewFileName ?? '',
-    album.previewFileId,
-  )
+  const { displayUrl: previewSrc, loading: previewLoading, failed: previewFailed } =
+    useDecryptedMediaSrc(
+      album.previewUrl,
+      album.previewIsEncrypted,
+      userId,
+      album.previewFileName ?? '',
+      album.previewFileId,
+    )
 
   function openIfNotHandle(e: React.MouseEvent | React.KeyboardEvent) {
     if ('target' in e) {
@@ -50,8 +51,6 @@ export function AlbumCard({
     }
     if (!busy) onOpen(album)
   }
-
-  const showMedia = Boolean(album.previewUrl && previewSrc)
 
   return (
     <article
@@ -69,7 +68,9 @@ export function AlbumCard({
     >
       <div className="album-card__thumb">
         {dragHandle ? <div className="album-card__drag-slot">{dragHandle}</div> : null}
-        {showMedia && previewSrc ? (
+        {album.previewUrl && previewLoading && !previewSrc && !previewFailed ? (
+          <div className="album-card__thumb-inner album-card__thumb-inner--skeleton" aria-hidden />
+        ) : album.previewUrl && previewSrc ? (
           <div className="album-card__thumb-inner album-card__thumb-inner--media">
             {album.previewIsVideo ? (
               <>
@@ -85,6 +86,8 @@ export function AlbumCard({
               <img className="album-card__thumb-img" src={previewSrc} alt="" loading="lazy" />
             )}
           </div>
+        ) : album.previewUrl && previewFailed ? (
+          <div className="album-card__thumb-inner album-card__thumb-inner--failed" aria-hidden />
         ) : (
           <div className="album-card__thumb-inner" aria-hidden>
             <svg viewBox="0 0 48 48" className="album-card__icon">

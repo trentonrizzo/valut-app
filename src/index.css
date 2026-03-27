@@ -574,6 +574,25 @@ button {
   overflow: hidden;
 }
 
+.album-card__thumb-inner--skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.12) 45%,
+    rgba(255, 255, 255, 0.05) 90%
+  );
+  background-size: 200% 100%;
+  animation: vault-media-shimmer 1.1s ease-in-out infinite;
+}
+
+.album-card__thumb-inner--failed {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .album-card__thumb-img {
   width: 100%;
   height: 100%;
@@ -981,6 +1000,27 @@ button {
   border-radius: 8px;
   overflow: hidden;
   background: #111;
+}
+
+.album-cover-picker__thumb-skeleton {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.14) 45%,
+    rgba(255, 255, 255, 0.06) 90%
+  );
+  background-size: 200% 100%;
+  animation: vault-media-shimmer 1.1s ease-in-out infinite;
+}
+
+.album-cover-picker__thumb-failed {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .album-cover-picker__thumb img,
@@ -1813,6 +1853,43 @@ button {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.vault-photo-tile__media--skeleton {
+  background: linear-gradient(
+    110deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.1) 45%,
+    rgba(255, 255, 255, 0.04) 90%
+  );
+  background-size: 200% 100%;
+  animation: vault-media-shimmer 1.1s ease-in-out infinite;
+}
+
+.vault-photo-tile__media--failed {
+  background: rgba(255, 255, 255, 0.05);
+  position: relative;
+}
+
+.vault-photo-tile__media--failed::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 28px;
+  height: 28px;
+  opacity: 0.35;
+  background: center / contain no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='1.5'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Ccircle cx='8.5' cy='10.5' r='1.5' fill='%23888' stroke='none'/%3E%3Cpath d='M21 15l-5-5L5 21'/%3E%3C/svg%3E");
+}
+
+@keyframes vault-media-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
 .vault-photo-tile__media img,
 .vault-photo-tile__media video,
 .vault-photo-tile__thumb-img {
@@ -2585,6 +2662,15 @@ button {
   border: 3px solid rgba(255, 255, 255, 0.15);
   border-top-color: rgba(255, 255, 255, 0.75);
   animation: spin 0.65s linear infinite;
+}
+
+.fs-media-viewer__failed {
+  width: min(72vw, 280px);
+  height: min(72vw, 280px);
+  max-height: 50dvh;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: auto;
 }
 
 .fs-media-viewer__counter {
