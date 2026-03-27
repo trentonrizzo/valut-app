@@ -1,5 +1,4 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { useAuth } from '../context/useAuth'
 import {
   getDecryptedBlobCacheVersion,
   getDecryptedBlobUrlForFile,
@@ -28,9 +27,6 @@ export function useDecryptedMediaSrc(
   fileNameHint: string,
   fileId?: string | null,
 ): VaultMediaState {
-  const { session } = useAuth()
-  const accessToken = session?.access_token ?? null
-
   const cacheVersion = useSyncExternalStore(
     subscribeDecryptedBlobCache,
     getDecryptedBlobCacheVersion,
@@ -44,13 +40,13 @@ export function useDecryptedMediaSrc(
   const enc = isEncrypted === true
 
   const needsSignedRemote =
-    Boolean(storedUrl && userId && fileId && accessToken) &&
+    Boolean(storedUrl && userId && fileId) &&
     !isBlob &&
     !(enc && cachedDecrypted)
 
   const { signedUrl, loading: signingLoading, error: signError } = useSignedRemoteUrl({
     fileId: fileId ?? null,
-    accessToken,
+    storedUrl: storedUrl ?? null,
     enabled: needsSignedRemote,
   })
 
@@ -117,7 +113,7 @@ export function useDecryptedMediaSrc(
     }
   }
 
-  if (!fileId || !accessToken) {
+  if (!fileId) {
     return { displayUrl: null, downloadUrl: null, loading: false, failed: true }
   }
 

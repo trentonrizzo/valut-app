@@ -3,7 +3,7 @@ import { fetchSignedMediaUrl } from '../lib/fetchSignedMediaUrl'
 
 type Args = {
   fileId: string | null | undefined
-  accessToken: string | null | undefined
+  storedUrl: string | null | undefined
   /** When false, skip network (e.g. local blob preview). */
   enabled: boolean
 }
@@ -11,7 +11,7 @@ type Args = {
 /**
  * Fetches a short-lived signed GET URL for a file row (private R2).
  */
-export function useSignedRemoteUrl({ fileId, accessToken, enabled }: Args): {
+export function useSignedRemoteUrl({ fileId, storedUrl, enabled }: Args): {
   signedUrl: string | null
   loading: boolean
   error: boolean
@@ -20,10 +20,10 @@ export function useSignedRemoteUrl({ fileId, accessToken, enabled }: Args): {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
 
-  const canFetch = Boolean(enabled && fileId && accessToken)
+  const canFetch = Boolean(enabled && fileId && storedUrl)
 
   useEffect(() => {
-    if (!canFetch || !fileId || !accessToken) {
+    if (!canFetch || !fileId || !storedUrl) {
       queueMicrotask(() => {
         setSignedUrl(null)
         setLoading(false)
@@ -40,7 +40,7 @@ export function useSignedRemoteUrl({ fileId, accessToken, enabled }: Args): {
       setError(false)
       setSignedUrl(null)
 
-      void fetchSignedMediaUrl(fileId, accessToken)
+      void fetchSignedMediaUrl(fileId, storedUrl)
         .then((url) => {
           if (!cancelled) {
             setSignedUrl(url)
@@ -61,7 +61,7 @@ export function useSignedRemoteUrl({ fileId, accessToken, enabled }: Args): {
     return () => {
       cancelled = true
     }
-  }, [canFetch, fileId, accessToken])
+  }, [canFetch, fileId, storedUrl])
 
   return {
     signedUrl: canFetch ? signedUrl : null,
