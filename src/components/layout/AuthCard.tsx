@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { ReactNode } from 'react'
+import { AppLogo } from '../AppLogo'
 
 type Props = {
   title: string
@@ -13,7 +14,7 @@ export function AuthCard({ title, subtitle, children, footer }: Props) {
     <div className="auth-page">
       <div className="auth-brand">
         <Link to="/" className="auth-logo">
-          Vault
+          <AppLogo variant="auth" />
         </Link>
       </div>
       <div className="auth-card">

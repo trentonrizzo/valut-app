@@ -22,7 +22,7 @@ export function Login() {
   }
 
   if (user) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/albums" replace />
   }
 
   async function handleSubmit(e: FormEvent) {

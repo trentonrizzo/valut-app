@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Link } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
@@ -10,6 +9,8 @@ import { CreateAlbumModal } from '../components/albums/CreateAlbumModal'
 import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
 import { MediaViewer } from '../components/files/MediaViewer'
+import { UploadProgressOverlay } from '../components/UploadProgressOverlay'
+import { batchUploadFilesToAlbum } from '../lib/batchUploadToAlbum'
 
 function isVideoFileName(name: string) {
   return /\.(mp4|webm|ogg|mov|mkv)$/i.test(String(name || '').toLowerCase())
@@ -60,7 +61,7 @@ function GridColsIcon({ cols }: { cols: number }) {
 }
 
 export function Dashboard() {
-  const { user, signOut } = useAuth()
+  const { user } = useAuth()
   const { showToast } = useToast()
 
   const [albums, setAlbums] = useState<AlbumWithMeta[]>([])
@@ -423,23 +424,6 @@ export function Dashboard() {
 
   return (
     <div className="dashboard">
-      <header className="dashboard__header">
-        <div className="dashboard__brand">
-          <Link to="/dashboard" className="dashboard__logo">
-            Vault
-          </Link>
-          <span className="dashboard__tagline">Cloud storage</span>
-        </div>
-        <div className="dashboard__user">
-          <span className="dashboard__email" title={user?.email ?? undefined}>
-            {user?.email}
-          </span>
-          <button type="button" className="btn btn--ghost" onClick={() => signOut()}>
-            Sign out
-          </button>
-        </div>
-      </header>
-
       <main className="dashboard__main">
         {!openAlbum ? (
           <>
@@ -574,105 +558,21 @@ export function Dashboard() {
                         setUploadBatchTotal(filesArray.length)
                         setUploadBatchIndex(1)
                         setUploadEtaText(null)
-                        const totalBytes = filesArray.reduce((s, f) => s + f.size, 0)
-                        uploadTotalBytesRef.current = totalBytes
-                        uploadStartMsRef.current = Date.now()
-
-                        const total = filesArray.length
-                        let index = 0
-                        let completedBytes = 0
-                        const failed: string[] = []
 
                         try {
-                          for (const file of filesArray) {
-                            index += 1
-                            setUploadFileName(file.name)
-                            setUploadBatchIndex(index)
-
-                            try {
-                              const presignRes = await fetch('/api/r2-upload-url', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ fileName: file.name }),
-                              })
-
-                              const presign = await presignRes.json()
-
-                              if (
-                                !presignRes.ok ||
-                                presign?.ok !== true ||
-                                !presign.uploadUrl ||
-                                !presign.fileUrl
-                              ) {
-                                throw new Error(presign?.error || 'Could not create upload URL')
-                              }
-
-                              const { uploadUrl, fileUrl } = presign as {
-                                uploadUrl: string
-                                fileUrl: string
-                              }
-
-                              await new Promise<void>((resolve, reject) => {
-                                const xhr = new XMLHttpRequest()
-                                xhr.open('PUT', uploadUrl, true)
-                                xhr.setRequestHeader('Content-Type', 'application/octet-stream')
-
-                                xhr.upload.onprogress = (event) => {
-                                  if (!event.lengthComputable || totalBytes <= 0) return
-                                  const currentFileBytes = (event.loaded / event.total) * file.size
-                                  const totalDone = completedBytes + currentFileBytes
-                                  const overallPct = Math.round((totalDone / totalBytes) * 100)
-                                  setUploadProgress(Math.min(100, overallPct))
-
-                                  const elapsed = Date.now() - uploadStartMsRef.current
-                                  if (elapsed > 2500 && overallPct > 2 && overallPct < 99) {
-                                    const rate = totalDone / elapsed
-                                    if (rate > 0) {
-                                      const remainingMs = (totalBytes - totalDone) / rate
-                                      if (remainingMs > 4000 && remainingMs < 1000 * 60 * 60 * 4) {
-                                        const sec = Math.ceil(remainingMs / 1000)
-                                        setUploadEtaText(
-                                          sec < 60 ? `~${sec}s left` : `~${Math.round(sec / 60)}m left`,
-                                        )
-                                      } else {
-                                        setUploadEtaText(null)
-                                      }
-                                    }
-                                  } else if (elapsed <= 2500) {
-                                    setUploadEtaText(null)
-                                  }
-                                }
-
-                                xhr.onload = () => {
-                                  if (xhr.status >= 200 && xhr.status < 300) {
-                                    resolve()
-                                  } else {
-                                    reject(new Error(`Upload failed (${xhr.status})`))
-                                  }
-                                }
-
-                                xhr.onerror = () => reject(new Error('Upload failed'))
-
-                                xhr.send(file)
-                              })
-
-                              completedBytes += file.size
-
-                              const { error: insertError } = await supabase.from('files').insert({
-                                user_id: user.id,
-                                album_id: openAlbum.id,
-                                file_name: file.name,
-                                file_url: fileUrl,
-                                file_size_bytes: file.size,
-                              })
-
-                              if (insertError) throw new Error(insertError.message)
-                            } catch (err) {
-                              failed.push(file.name)
-                              console.error('Upload failed for file:', file.name, err)
-                              continue
-                            }
-                          }
+                          const { failed, total } = await batchUploadFilesToAlbum(
+                            filesArray,
+                            openAlbum.id,
+                            user.id,
+                            { uploadStartMsRef, uploadTotalBytesRef },
+                            (p) => {
+                              setUploadProgress(p.progress)
+                              setUploadFileName(p.fileName)
+                              setUploadBatchIndex(p.batchIndex)
+                              setUploadBatchTotal(p.batchTotal)
+                              setUploadEtaText(p.etaText)
+                            },
+                          )
 
                           const { data, error: selectError } = await supabase
                             .from('files')
@@ -702,9 +602,9 @@ export function Dashboard() {
                               'error',
                             )
                           }
-                        } catch (e) {
-                          showToast(e instanceof Error ? e.message : 'Upload failed', 'error')
-                          console.error(e)
+                        } catch (err) {
+                          showToast(err instanceof Error ? err.message : 'Upload failed', 'error')
+                          console.error(err)
                         } finally {
                           setUploading(false)
                           setUploadProgress(0)
@@ -722,39 +622,14 @@ export function Dashboard() {
               </div>
             </div>
 
-            {uploading ? (
-            <div className="modal-backdrop vault-upload-overlay" role="presentation">
-              <div
-                className="vault-upload-chip modal--enter"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="upload-progress-title"
-                onClick={(ev) => ev.stopPropagation()}
-              >
-                <p id="upload-progress-title" className="vault-upload-chip__meta">
-                  {uploadBatchTotal > 0 ? (
-                    <span className="vault-upload-chip__batch">
-                      {uploadBatchIndex} of {uploadBatchTotal}
-                    </span>
-                  ) : null}
-                  {uploadBatchTotal > 0 ? <span className="vault-upload-chip__sep"> · </span> : null}
-                  <span>{uploadProgress}%</span>
-                </p>
-                <p className="vault-upload-chip__name" title={uploadFileName ?? undefined}>
-                  {uploadFileName ?? 'File'}
-                </p>
-                {uploadEtaText ? <p className="vault-upload-chip__eta">{uploadEtaText}</p> : null}
-                <div className="vault-upload-chip__bar" aria-label="Upload progress">
-                  <div
-                    className="vault-upload-chip__bar-fill"
-                    style={{
-                      width: `${uploadProgress}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-            ) : null}
+            <UploadProgressOverlay
+              uploading={uploading}
+              uploadProgress={uploadProgress}
+              uploadFileName={uploadFileName}
+              uploadBatchIndex={uploadBatchIndex}
+              uploadBatchTotal={uploadBatchTotal}
+              uploadEtaText={uploadEtaText}
+            />
 
             {filesError ? (
             <div className="banner banner--error" role="alert">

@@ -1,5 +1,6 @@
 import { Link, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
+import { AppLogo } from '../components/AppLogo'
 
 export function Home() {
   const { user, loading } = useAuth()
@@ -14,13 +15,15 @@ export function Home() {
   }
 
   if (user) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to="/albums" replace />
   }
 
   return (
     <div className="landing">
       <div className="landing__inner">
-        <h1 className="landing__title">Vault</h1>
+        <h1 className="landing__title landing__title--logo">
+          <AppLogo variant="hero" />
+        </h1>
         <p className="landing__lead">Dark, minimal cloud storage for your files and albums.</p>
         <div className="landing__actions">
           <Link to="/login" className="btn btn--primary">
