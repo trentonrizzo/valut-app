@@ -47,13 +47,19 @@ export default async function handler(req, res) {
 
     const bucket =
       process.env.R2_BUCKET || process.env.R2_BUCKET_NAME || "vault-storage";
+    const publicBase = String(process.env.R2_PUBLIC_URL || "").replace(/\/+$/, "");
 
-    if (!bucket) {
-      return res.status(200).json({ ok: false, error: "R2 is not configured" });
+    if (!bucket || !publicBase) {
+      return res.status(200).json({
+        ok: false,
+        error: "R2 is not configured (need R2_BUCKET and R2_PUBLIC_URL)",
+      });
     }
 
     const sanitizedFileName = sanitizeFileName(fileName);
     const key = `uploads/${Date.now()}-${sanitizedFileName}`;
+    const segments = key.split("/").filter(Boolean).map((s) => encodeURIComponent(s));
+    const fileUrl = `${publicBase}/${segments.join("/")}`;
 
     const command = new PutObjectCommand({
       Bucket: bucket,
@@ -62,8 +68,6 @@ export default async function handler(req, res) {
     });
 
     const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 60 });
-    /** DB stores object key only; reads use signed GET URLs. */
-    const fileUrl = key;
 
     return res.status(200).json({ ok: true, uploadUrl, fileUrl, key });
   } catch (err) {

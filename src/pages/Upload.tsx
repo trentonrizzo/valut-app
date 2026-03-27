@@ -84,7 +84,7 @@ export function Upload() {
       let fileIds: (string | null)[]
       let failed: string[]
       let total: number
-      let errors: (string | null)[]
+      let errors: (string | null)[] = []
 
       try {
         const r = await batchUploadFilesToAlbum(
@@ -109,30 +109,12 @@ export function Upload() {
                         ...item,
                         progress: p.currentFilePercent ?? item.progress,
                         name: p.fileName ?? item.name,
-                        status:
-                          item.status === 'queued'
-                            ? 'uploading'
-                            : item.status === 'preparing'
-                              ? 'uploading'
-                              : item.status,
+                        status: item.status === 'queued' ? 'uploading' : item.status,
                       }
                     : item,
                 ),
               )
             }
-          },
-          {
-            onFilePhase: (fileIndex, phase) => {
-              const targetId = queueIds[fileIndex]
-              if (!targetId) return
-              setUploadQueueItems((prev) =>
-                prev.map((item) => {
-                  if (item.id !== targetId) return item
-                  if (phase === 'preparing') return { ...item, status: 'preparing' }
-                  return { ...item, status: 'uploading', progress: Math.max(item.progress, 12) }
-                }),
-              )
-            },
           },
         )
         fileIds = r.fileIds

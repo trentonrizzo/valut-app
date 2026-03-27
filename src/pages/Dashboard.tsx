@@ -15,7 +15,6 @@ import { AlbumCoverPickerModal } from '../components/albums/AlbumCoverPickerModa
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
 import { UploadQueueOverlay, type UploadQueueItem } from '../components/UploadQueueOverlay'
 import { batchUploadFilesToAlbum, validateUploadFileSizes } from '../lib/batchUploadToAlbum'
-import { setDecryptedBlobUrlForFile } from '../lib/decryptedBlobCache'
 import { sortGalleryFiles, type FileSort } from '../lib/gallerySort'
 import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
 
@@ -208,26 +207,12 @@ export function Dashboard() {
                         ...item,
                         progress: p.currentFilePercent ?? item.progress,
                         name: p.fileName ?? item.name,
-                        status:
-                          item.status === 'queued' ? 'uploading' : item.status === 'preparing' ? 'uploading' : item.status,
+                        status: item.status === 'queued' ? 'uploading' : item.status,
                       }
                     : item,
                 ),
               )
             }
-          },
-          {
-            onFilePhase: (fileIndex, phase) => {
-              const targetId = queueIds[fileIndex]
-              if (!targetId) return
-              setUploadQueueItems((prev) =>
-                prev.map((item) => {
-                  if (item.id !== targetId) return item
-                  if (phase === 'preparing') return { ...item, status: 'preparing' }
-                  return { ...item, status: 'uploading', progress: Math.max(item.progress, 12) }
-                }),
-              )
-            },
           },
         )
         fileIds = r.fileIds
@@ -251,11 +236,6 @@ export function Dashboard() {
         showToast(msg, 'error')
         finishAlbumUploadUi()
         return
-      }
-
-      for (let i = 0; i < filesArray.length; i++) {
-        const fid = fileIds[i]
-        if (fid) setDecryptedBlobUrlForFile(fid, optimisticUrls[i]!)
       }
 
       let serverRows: FileRow[] = []
@@ -922,21 +902,21 @@ export function Dashboard() {
                       className="vault-action-sheet__item"
                       href={fileActionMedia.downloadUrl ?? '#'}
                       download={fileActionTarget.file_name}
-                      aria-disabled={fileActionMedia.loading || !fileActionMedia.downloadUrl}
+                      aria-disabled={!fileActionMedia.downloadUrl}
                       onClick={(e) => {
-                        if (fileActionMedia.loading || !fileActionMedia.downloadUrl) {
+                        if (!fileActionMedia.downloadUrl) {
                           e.preventDefault()
                           return
                         }
                         setFileActionTarget(null)
                       }}
                     >
-                      {fileActionMedia.loading ? 'Preparing download…' : 'Download'}
+                      Download
                     </a>
                     <button
                       type="button"
                       className="vault-action-sheet__item"
-                      disabled={fileActionMedia.loading || !fileActionMedia.downloadUrl}
+                      disabled={!fileActionMedia.downloadUrl}
                       onClick={async () => {
                         const url = fileActionMedia.downloadUrl
                         if (!url) {

@@ -1,17 +1,8 @@
 import type { MutableRefObject } from 'react'
 import { supabase } from './supabase'
-import { encryptFile, ensureEncryptionKey } from './vaultCrypto'
-import { isVideoFileName } from './mediaTypes'
 
 /** Max single-file size before upload (approximate safety limit). */
 export const MAX_UPLOAD_FILE_BYTES = 200 * 1024 * 1024
-
-/** Videos at or above this size run with at most one concurrent large-video job (plus one smaller file). */
-export const LARGE_VIDEO_BYTES = 32 * 1024 * 1024
-
-export function isLargeVideoFile(file: File): boolean {
-  return isVideoFileName(file.name) && file.size >= LARGE_VIDEO_BYTES
-}
 
 export type BatchUploadProgress = {
   progress: number
@@ -19,22 +10,16 @@ export type BatchUploadProgress = {
   batchIndex: number
   batchTotal: number
   etaText: string | null
-  /** 1-based index of the file currently being processed */
   currentFileIndex: number
-  /** 0–100 for the active file only (encrypt + upload) */
   currentFilePercent?: number
 }
-
-export type BatchUploadFilePhase = 'preparing' | 'uploading'
 
 export type FilePurpose = 'content' | 'cover'
 
 export type BatchUploadResult = {
   failed: string[]
   total: number
-  /** Same order as input files; null where that index failed */
   fileIds: (string | null)[]
-  /** Human-readable error per index, or null if ok */
   errors: (string | null)[]
 }
 
@@ -43,7 +28,6 @@ type Refs = {
   uploadTotalBytesRef: MutableRefObject<number>
 }
 
-/** Returns false if any file exceeds the limit (shows alert). */
 export function validateUploadFileSizes(files: File[]): boolean {
   for (const f of files) {
     if (f.size > MAX_UPLOAD_FILE_BYTES) {
@@ -70,9 +54,6 @@ async function presignUpload(fileName: string): Promise<{ uploadUrl: string; fil
   return presign as { uploadUrl: string; fileUrl: string }
 }
 
-/**
- * Upload blob to R2 via presigned PUT. Progress is per-file (loaded/total for this upload).
- */
 async function putBlobToR2(
   body: Blob,
   uploadUrl: string,
@@ -102,34 +83,13 @@ async function putBlobToR2(
   })
 }
 
-function canStartWithActive(file: File, activeChosen: File[]): boolean {
-  if (activeChosen.length >= 2) return false
-  const largeActive = activeChosen.filter(isLargeVideoFile).length
-  if (isLargeVideoFile(file) && largeActive >= 1) return false
-  return true
+function humanError(e: unknown): string {
+  if (e instanceof Error) return e.message
+  return 'Something went wrong'
 }
 
 /**
- * Pick next batch (max 2 files) that may run in parallel respecting large-video rule.
- */
-function pickNextBatch(filesArray: File[], pending: number[]): number[] {
-  const batch: number[] = []
-  for (const i of [...pending]) {
-    const chosen = batch.map((idx) => filesArray[idx]!)
-    if (canStartWithActive(filesArray[i]!, chosen)) {
-      batch.push(i)
-      if (batch.length >= 2) break
-    }
-  }
-  for (const i of batch) {
-    const pos = pending.indexOf(i)
-    if (pos !== -1) pending.splice(pos, 1)
-  }
-  return batch
-}
-
-/**
- * Upload one encrypted file to R2, insert as purpose=cover, set albums.cover_file_id.
+ * Upload cover image/video: raw file bytes to R2, public URL in DB.
  */
 export async function uploadCoverAndSetAlbum(
   file: File,
@@ -143,10 +103,7 @@ export async function uploadCoverAndSetAlbum(
     throw new Error('File too large')
   }
 
-  const key = await ensureEncryptionKey(userId)
-  const encryptedBlob = await encryptFile(file, key)
-  const totalBytes = encryptedBlob.size
-  refs.uploadTotalBytesRef.current = totalBytes
+  refs.uploadTotalBytesRef.current = Math.max(1, file.size)
   refs.uploadStartMsRef.current = Date.now()
 
   onProgress({
@@ -161,7 +118,7 @@ export async function uploadCoverAndSetAlbum(
 
   const { uploadUrl, fileUrl } = await presignUpload(file.name)
 
-  await putBlobToR2(encryptedBlob, uploadUrl, (loaded, tot) => {
+  await putBlobToR2(file, uploadUrl, (loaded, tot) => {
     const pct = Math.min(100, Math.round((loaded / tot) * 100))
     let etaText: string | null = null
     const elapsed = Date.now() - refs.uploadStartMsRef.current
@@ -195,7 +152,7 @@ export async function uploadCoverAndSetAlbum(
       file_url: fileUrl,
       file_size_bytes: file.size,
       purpose: 'cover',
-      is_encrypted: true,
+      is_encrypted: false,
       mime_type: file.type || null,
     })
     .select('id')
@@ -225,14 +182,8 @@ export async function uploadCoverAndSetAlbum(
   return { fileId: data.id }
 }
 
-function humanError(e: unknown): string {
-  if (e instanceof Error) return e.message
-  return 'Something went wrong'
-}
-
 /**
- * Uploads files to R2 + inserts metadata (encrypted ciphertext).
- * Runs in waves of up to 2 files; at most one large video (≥32MB) per wave.
+ * Upload files one at a time: raw bytes to R2, public URLs in DB (not encrypted).
  */
 export async function batchUploadFilesToAlbum(
   filesArray: File[],
@@ -240,13 +191,9 @@ export async function batchUploadFilesToAlbum(
   userId: string,
   refs: Refs,
   onProgress: (p: BatchUploadProgress) => void,
-  options?: {
-    purpose?: FilePurpose
-    onFilePhase?: (fileIndex: number, phase: BatchUploadFilePhase) => void
-  },
+  options?: { purpose?: FilePurpose },
 ): Promise<BatchUploadResult> {
   const purpose: FilePurpose = options?.purpose ?? 'content'
-  const onFilePhase = options?.onFilePhase
   const total = filesArray.length
   if (total === 0) {
     return { failed: [], total: 0, fileIds: [], errors: [] }
@@ -261,27 +208,16 @@ export async function batchUploadFilesToAlbum(
     }
   }
 
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => setTimeout(resolve, 0))
-  })
-
-  const key = await ensureEncryptionKey(userId)
-
-  const estimatedBytes = filesArray.reduce((s, f) => s + f.size, 0) * 1.08
+  const estimatedBytes = filesArray.reduce((s, f) => s + f.size, 0)
   refs.uploadTotalBytesRef.current = Math.max(1, Math.round(estimatedBytes))
   refs.uploadStartMsRef.current = Date.now()
 
   const failed: string[] = []
   const fileIds: (string | null)[] = new Array(total).fill(null)
   const errors: (string | null)[] = new Array(total).fill(null)
-  /** Per-file completion weight 0–1 for overall progress */
   const weight = new Float64Array(total)
 
-  const emitProgress = (
-    fileIndexZeroBased: number,
-    fileName: string | null,
-    currentFilePercent?: number,
-  ) => {
+  const emitProgress = (fileIndexZeroBased: number, fileName: string | null, currentFilePercent?: number) => {
     let sum = 0
     for (let w = 0; w < weight.length; w++) sum += weight[w]!
     const pct = Math.min(99, Math.round((sum / total) * 100))
@@ -309,37 +245,28 @@ export async function batchUploadFilesToAlbum(
     })
   }
 
-  async function uploadSingleFile(fileIndex: number): Promise<void> {
+  onProgress({
+    progress: 0,
+    fileName: filesArray[0]?.name ?? null,
+    batchIndex: 1,
+    batchTotal: total,
+    etaText: null,
+    currentFileIndex: 1,
+    currentFilePercent: 0,
+  })
+
+  for (let fileIndex = 0; fileIndex < total; fileIndex++) {
     const file = filesArray[fileIndex]!
-
-    weight[fileIndex] = 0.02
-    emitProgress(fileIndex, file.name, 2)
-    onFilePhase?.(fileIndex, 'preparing')
-
-    let encryptedBlob: Blob
-    try {
-      encryptedBlob = await encryptFile(file, key)
-    } catch (e) {
-      const msg = humanError(e)
-      failed.push(file.name)
-      errors[fileIndex] = `Could not encrypt: ${msg}`
-      weight[fileIndex] = 0
-      console.error('Encrypt failed for file:', file.name, e)
-      emitProgress(fileIndex, file.name, 0)
-      return
-    }
-
-    onFilePhase?.(fileIndex, 'uploading')
-    weight[fileIndex] = 0.1
-    emitProgress(fileIndex, file.name, 12)
+    weight[fileIndex] = 0.05
+    emitProgress(fileIndex, file.name, 5)
 
     try {
       const { uploadUrl, fileUrl } = await presignUpload(file.name)
 
-      await putBlobToR2(encryptedBlob, uploadUrl, (loaded, tot) => {
+      await putBlobToR2(file, uploadUrl, (loaded, tot) => {
         const frac = tot > 0 ? loaded / tot : 1
-        weight[fileIndex] = 0.1 + frac * 0.85
-        const filePct = Math.min(99, Math.round(12 + frac * 88))
+        weight[fileIndex] = 0.05 + frac * 0.9
+        const filePct = Math.min(99, Math.round(5 + frac * 90))
         emitProgress(fileIndex, file.name, filePct)
       })
 
@@ -352,7 +279,7 @@ export async function batchUploadFilesToAlbum(
           file_url: fileUrl,
           file_size_bytes: file.size,
           purpose,
-          is_encrypted: true,
+          is_encrypted: false,
           mime_type: file.type || null,
         })
         .select('id')
@@ -372,33 +299,6 @@ export async function batchUploadFilesToAlbum(
       console.error('Upload failed for file:', file.name, e)
       emitProgress(fileIndex, file.name, 0)
     }
-  }
-
-  const pending = [...Array(total).keys()]
-
-  onProgress({
-    progress: 0,
-    fileName: filesArray[0]?.name ?? null,
-    batchIndex: 1,
-    batchTotal: total,
-    etaText: null,
-    currentFileIndex: 1,
-    currentFilePercent: 0,
-  })
-
-  while (pending.length > 0) {
-    const batch = pickNextBatch(filesArray, pending)
-    if (batch.length === 0) {
-      console.error('batchUploadFilesToAlbum: could not schedule remaining files', pending)
-      for (const i of pending) {
-        const file = filesArray[i]!
-        failed.push(file.name)
-        errors[i] = 'Could not schedule upload'
-        weight[i] = 0
-      }
-      break
-    }
-    await Promise.all(batch.map((i) => uploadSingleFile(i)))
   }
 
   onProgress({

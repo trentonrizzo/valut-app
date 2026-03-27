@@ -39,16 +39,13 @@ function SlideImage({
   file: FileRow
   userId: string
 }) {
-  const { displayUrl, loading, failed } = useDecryptedMediaSrc(
+  const { displayUrl, failed } = useDecryptedMediaSrc(
     file.file_url,
     file.is_encrypted,
     userId,
     file.file_name,
     file.id,
   )
-  if (loading) {
-    return <div className="fs-media-viewer__loading" aria-busy />
-  }
   if (failed || !displayUrl) {
     return <div className="fs-media-viewer__failed" aria-label="Could not load image" />
   }
@@ -68,7 +65,7 @@ function SlideVideo({
   playbackRate: number
   loop: boolean
 }) {
-  const { displayUrl, loading, failed } = useDecryptedMediaSrc(
+  const { displayUrl, failed } = useDecryptedMediaSrc(
     file.file_url,
     file.is_encrypted,
     userId,
@@ -99,9 +96,6 @@ function SlideVideo({
     }
   }, [isActive, displayUrl, loop])
 
-  if (loading) {
-    return <div className="fs-media-viewer__loading" aria-busy />
-  }
   if (failed || !displayUrl) {
     return <div className="fs-media-viewer__failed" aria-label="Could not load video" />
   }

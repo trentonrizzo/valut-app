@@ -70,7 +70,7 @@ function VideoTilePoster({ src }: { src: string }) {
 }
 
 export function VaultPhotoTileMedia({ file, userId }: Props) {
-  const { displayUrl, loading, failed } = useDecryptedMediaSrc(
+  const { displayUrl, failed } = useDecryptedMediaSrc(
     file.file_url,
     file.is_encrypted,
     userId,
@@ -78,10 +78,6 @@ export function VaultPhotoTileMedia({ file, userId }: Props) {
     file.id,
   )
   const isVideo = isVideoFileName(file.file_name)
-
-  if (loading) {
-    return <div className="vault-photo-tile__media vault-photo-tile__media--skeleton" aria-hidden />
-  }
 
   if (failed || !displayUrl) {
     return (
