@@ -2,5 +2,10 @@ import type { Database } from './database'
 
 export type AlbumRow = Database['public']['Tables']['albums']['Row']
 
-/** Album row plus item count from nested `items(count)` query */
-export type AlbumWithMeta = AlbumRow & { itemCount: number }
+/** Album with aggregated file stats and preview metadata (computed client-side). */
+export type AlbumWithMeta = AlbumRow & {
+  itemCount: number
+  totalBytes: number
+  previewUrl: string | null
+  previewIsVideo: boolean
+}

@@ -2,30 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
-import { fetchAlbumsWithCounts, mapAlbumRow } from '../lib/albumQueries'
-import type { AlbumWithMeta } from '../types/album'
+import { buildAlbumsWithMeta, fetchAlbumsWithCounts } from '../lib/albumQueries'
+import { formatBytes } from '../lib/formatBytes'
+import { isVideoFileName } from '../lib/mediaTypes'
+import type { AlbumRow, AlbumWithMeta } from '../types/album'
 import { AlbumGrid } from '../components/albums/AlbumGrid'
 import { CreateAlbumModal } from '../components/albums/CreateAlbumModal'
 import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
+import { AlbumCoverPickerModal } from '../components/albums/AlbumCoverPickerModal'
 import { MediaViewer } from '../components/files/MediaViewer'
 import { UploadProgressOverlay } from '../components/UploadProgressOverlay'
 import { batchUploadFilesToAlbum } from '../lib/batchUploadToAlbum'
-
-function isVideoFileName(name: string) {
-  return /\.(mp4|webm|ogg|mov|mkv)$/i.test(String(name || '').toLowerCase())
-}
-
-function formatFileSizeBytes(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n) || n < 0) return '—'
-  if (n < 1024) return `${Math.round(n)} B`
-  const kb = n / 1024
-  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`
-  const mb = kb / 1024
-  if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
-  const gb = mb / 1024
-  return `${gb < 10 ? gb.toFixed(1) : Math.round(gb)} GB`
-}
 
 const GALLERY_COLS_KEY = 'vault-gallery-grid-cols'
 type GalleryCols = 1 | 2 | 3 | 4 | 5
@@ -71,6 +59,7 @@ export function Dashboard() {
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<AlbumWithMeta | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<AlbumWithMeta | null>(null)
+  const [coverPickerAlbum, setCoverPickerAlbum] = useState<AlbumWithMeta | null>(null)
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set())
   const [creatingAlbum, setCreatingAlbum] = useState(false)
 
@@ -160,14 +149,24 @@ export function Dashboard() {
 
   const persistAlbumOrder = useCallback(
     async (reordered: AlbumWithMeta[]) => {
+      if (!user) return
       const rows = reordered
         .map((album, index) => ({ id: album.id, order_index: index }))
         .filter((row) => !String(row.id).startsWith('optimistic-'))
       if (rows.length === 0) return
-      const { error } = await supabase.from('albums').upsert(rows, { onConflict: 'id' })
-      if (error) showToast(error.message, 'error')
+      for (const row of rows) {
+        const { error } = await supabase
+          .from('albums')
+          .update({ order_index: row.order_index })
+          .eq('id', row.id)
+          .eq('user_id', user.id)
+        if (error) {
+          showToast(error.message, 'error')
+          break
+        }
+      }
     },
-    [showToast],
+    [showToast, user],
   )
 
   const handleAlbumReorder = useCallback(
@@ -340,7 +339,11 @@ export function Dashboard() {
       name,
       created_at: new Date().toISOString(),
       itemCount: 0,
+      totalBytes: 0,
+      previewUrl: null,
+      previewIsVideo: false,
       order_index: nextOrder,
+      cover_file_id: null,
     }
 
     setAlbums((prev) => [...prev, optimistic])
@@ -355,7 +358,7 @@ export function Dashboard() {
 
       if (error) throw new Error(error.message)
 
-      const real = mapAlbumRow({ ...data, files: [{ count: 0 }] })
+      const real = buildAlbumsWithMeta([data as AlbumRow], [])[0]
       setAlbums((prev) => prev.map((a) => (a.id === tempId ? real : a)))
       setOpenAlbumId(real.id)
       showToast('Album created')
@@ -403,19 +406,34 @@ export function Dashboard() {
     const removed = deleteTarget
     const id = removed.id
 
-    setAlbums((prev) => prev.filter((a) => a.id !== id))
-    if (openAlbumId === id) setOpenAlbumId(null)
-    setDeleteTarget(null)
-
     try {
       const { error } = await supabase.from('albums').delete().eq('id', id).eq('user_id', user.id)
       if (error) throw new Error(error.message)
+      setAlbums((prev) => prev.filter((a) => a.id !== id))
+      if (openAlbumId === id) setOpenAlbumId(null)
+      setDeleteTarget(null)
       showToast('Album deleted')
     } catch (e) {
-      setAlbums((prev) =>
-        [...prev, removed].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)),
-      )
       showToast(e instanceof Error ? e.message : 'Could not delete album', 'error')
+    }
+  }
+
+  async function handleRemoveAlbumCover(album: AlbumWithMeta) {
+    if (!user) return
+    setBusy(album.id, true)
+    try {
+      const { error } = await supabase
+        .from('albums')
+        .update({ cover_file_id: null })
+        .eq('id', album.id)
+        .eq('user_id', user.id)
+      if (error) throw new Error(error.message)
+      await refreshAlbums()
+      showToast('Cover removed')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not remove cover', 'error')
+    } finally {
+      setBusy(album.id, false)
     }
   }
 
@@ -481,6 +499,8 @@ export function Dashboard() {
                 onOpen={(album) => setOpenAlbumId(album.id)}
                 onRename={(a) => setRenameTarget(a)}
                 onDelete={(a) => setDeleteTarget(a)}
+                onSetCover={(a) => setCoverPickerAlbum(a)}
+                onRemoveCover={(a) => void handleRemoveAlbumCover(a)}
                 onCreateClick={() => setCreateModalOpen(true)}
                 onReorder={handleAlbumReorder}
               />
@@ -813,7 +833,7 @@ export function Dashboard() {
                     </div>
                     <div>
                       <dt>Size</dt>
-                      <dd>{formatFileSizeBytes(fileInfoTarget.file_size_bytes ?? undefined)}</dd>
+                      <dd>{formatBytes(fileInfoTarget.file_size_bytes ?? undefined)}</dd>
                     </div>
                   </dl>
                   <button type="button" className="btn btn--primary" onClick={() => setFileInfoTarget(null)}>
@@ -860,6 +880,21 @@ export function Dashboard() {
         albumName={deleteTarget?.name ?? ''}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
+      />
+
+      <AlbumCoverPickerModal
+        open={coverPickerAlbum !== null}
+        album={coverPickerAlbum}
+        userId={user?.id ?? ''}
+        onClose={() => setCoverPickerAlbum(null)}
+        onSaved={async () => {
+          await refreshAlbums()
+          showToast('Album cover updated')
+        }}
+        onRemoved={async () => {
+          await refreshAlbums()
+          showToast('Cover removed')
+        }}
       />
     </div>
   )

@@ -27,6 +27,8 @@ type Props = {
   onOpen: (album: AlbumWithMeta) => void
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
+  onSetCover?: (album: AlbumWithMeta) => void
+  onRemoveCover?: (album: AlbumWithMeta) => void
   onCreateClick: () => void
   onReorder: (next: AlbumWithMeta[]) => void
 }
@@ -38,6 +40,8 @@ function SortableAlbumItem({
   onOpen,
   onRename,
   onDelete,
+  onSetCover,
+  onRemoveCover,
 }: {
   album: AlbumWithMeta
   busy: boolean
@@ -45,6 +49,8 @@ function SortableAlbumItem({
   onOpen: (album: AlbumWithMeta) => void
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
+  onSetCover?: (album: AlbumWithMeta) => void
+  onRemoveCover?: (album: AlbumWithMeta) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: album.id,
@@ -66,6 +72,8 @@ function SortableAlbumItem({
         onOpen={onOpen}
         onRename={onRename}
         onDelete={onDelete}
+        onSetCover={onSetCover}
+        onRemoveCover={onRemoveCover}
         dragHandle={
           <button
             type="button"
@@ -97,6 +105,8 @@ export function AlbumGrid({
   onOpen,
   onRename,
   onDelete,
+  onSetCover,
+  onRemoveCover,
   onCreateClick,
   onReorder,
 }: Props) {
@@ -170,6 +180,8 @@ export function AlbumGrid({
                 onOpen={onOpen}
                 onRename={onRename}
                 onDelete={onDelete}
+                onSetCover={onSetCover}
+                onRemoveCover={onRemoveCover}
               />
             ))}
           </ul>

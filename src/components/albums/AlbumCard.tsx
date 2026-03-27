@@ -1,25 +1,10 @@
 import type { ReactNode } from 'react'
 import type { AlbumWithMeta } from '../../types/album'
+import { formatBytes } from '../../lib/formatBytes'
 import { AlbumCardMenu } from './AlbumCardMenu'
 
-function formatAlbumDate(iso: string): string {
-  try {
-    const d = new Date(iso)
-    return new Intl.DateTimeFormat(undefined, {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(d)
-  } catch {
-    return iso
-  }
-}
-
 function formatItemCount(n: number): string {
-  if (n === 0) return 'No items'
+  if (n === 0) return '0 items'
   if (n === 1) return '1 item'
   return `${n} items`
 }
@@ -33,13 +18,26 @@ type Props = {
   onOpen: (album: AlbumWithMeta) => void
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
+  onSetCover?: (album: AlbumWithMeta) => void
+  onRemoveCover?: (album: AlbumWithMeta) => void
 }
 
-export function AlbumCard({ album, busy, active, dragHandle, onOpen, onRename, onDelete }: Props) {
-  const created = formatAlbumDate(album.created_at)
-
+export function AlbumCard({
+  album,
+  busy,
+  active,
+  dragHandle,
+  onOpen,
+  onRename,
+  onDelete,
+  onSetCover,
+  onRemoveCover,
+}: Props) {
   function openIfNotHandle(e: React.MouseEvent | React.KeyboardEvent) {
-    if ('target' in e && (e.target as HTMLElement).closest('.album-card__drag-slot')) return
+    if ('target' in e) {
+      const el = e.target as HTMLElement
+      if (el.closest('.album-card__drag-slot') || el.closest('.album-menu')) return
+    }
     if (!busy) onOpen(album)
   }
 
@@ -59,41 +57,71 @@ export function AlbumCard({ album, busy, active, dragHandle, onOpen, onRename, o
     >
       <div className="album-card__thumb">
         {dragHandle ? <div className="album-card__drag-slot">{dragHandle}</div> : null}
-        <div className="album-card__thumb-inner" aria-hidden>
-          <svg viewBox="0 0 48 48" className="album-card__icon">
-            <rect
-              x="6"
-              y="10"
-              width="36"
-              height="28"
-              rx="3"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            />
-            <path
-              d="M6 18 L16 12 L26 20 L36 14 L42 18"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </div>
+        {album.previewUrl ? (
+          <div className="album-card__thumb-inner album-card__thumb-inner--media">
+            {album.previewIsVideo ? (
+              <>
+                <video
+                  className="album-card__thumb-img"
+                  src={album.previewUrl}
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+                <span className="album-card__video-badge" aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7L8 5z" />
+                  </svg>
+                  Video
+                </span>
+              </>
+            ) : (
+              <img className="album-card__thumb-img" src={album.previewUrl} alt="" loading="lazy" />
+            )}
+          </div>
+        ) : (
+          <div className="album-card__thumb-inner" aria-hidden>
+            <svg viewBox="0 0 48 48" className="album-card__icon">
+              <rect
+                x="6"
+                y="10"
+                width="36"
+                height="28"
+                rx="3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <path
+                d="M6 18 L16 12 L26 20 L36 14 L42 18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+        )}
         <AlbumCardMenu
           albumId={album.id}
           disabled={busy}
           onRename={() => onRename(album)}
           onDelete={() => onDelete(album)}
+          onSetCover={onSetCover ? () => onSetCover(album) : undefined}
+          onRemoveCover={onRemoveCover ? () => onRemoveCover(album) : undefined}
+          canSetCover={album.itemCount > 0}
+          hasCustomCover={album.cover_file_id != null}
         />
       </div>
       <div className="album-card__body">
         <h2 className="album-card__title" title={album.name}>
           {album.name}
         </h2>
-        <p className="album-card__count">{formatItemCount(album.itemCount)}</p>
-        <p className="album-card__meta">{created}</p>
+        <div className="album-card__stats" aria-label="Album size and item count">
+          <span className="album-card__stats-line">{formatItemCount(album.itemCount)}</span>
+          <span className="album-card__stats-line">{formatBytes(album.totalBytes)}</span>
+        </div>
       </div>
       {busy ? (
         <div className="album-card__busy" aria-hidden>

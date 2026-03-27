@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 type Props = {
   open: boolean
   albumName: string
@@ -6,12 +8,33 @@ type Props = {
 }
 
 export function ConfirmDeleteAlbumModal({ open, albumName, onClose, onConfirm }: Props) {
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open) setBusy(false)
+  }, [open])
+
   if (!open) return null
 
+  async function handleDelete() {
+    setBusy(true)
+    try {
+      await onConfirm()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div
+      className="modal-backdrop modal-backdrop--mobile-safe"
+      role="presentation"
+      onClick={() => {
+        if (!busy) onClose()
+      }}
+    >
       <div
-        className="modal modal--enter modal--danger"
+        className="modal modal--enter modal--mobile-safe modal--danger"
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="delete-album-title"
@@ -26,15 +49,16 @@ export function ConfirmDeleteAlbumModal({ open, albumName, onClose, onConfirm }:
           Items inside this album will be removed. This can’t be undone.
         </p>
         <div className="modal__actions modal__actions--split">
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
+          <button type="button" className="btn btn--ghost" onClick={onClose} disabled={busy}>
             Cancel
           </button>
           <button
             type="button"
             className="btn btn--danger"
-            onClick={() => void onConfirm()}
+            disabled={busy}
+            onClick={() => void handleDelete()}
           >
-            Delete album
+            {busy ? 'Deleting…' : 'Delete album'}
           </button>
         </div>
       </div>

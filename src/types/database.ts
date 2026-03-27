@@ -26,6 +26,7 @@ export interface Database {
           name: string
           created_at: string
           order_index: number
+          cover_file_id: string | null
         }
         Insert: {
           id?: string
@@ -33,6 +34,7 @@ export interface Database {
           name: string
           created_at?: string
           order_index?: number
+          cover_file_id?: string | null
         }
         Update: {
           id?: string
@@ -40,6 +42,7 @@ export interface Database {
           name?: string
           created_at?: string
           order_index?: number
+          cover_file_id?: string | null
         }
         Relationships: [
           {
@@ -47,6 +50,51 @@ export interface Database {
             columns: ['user_id']
             isOneToOne: false
             referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      files: {
+        Row: {
+          id: string
+          user_id: string
+          album_id: string
+          file_name: string
+          file_url: string
+          created_at: string
+          file_size_bytes: number | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          album_id: string
+          file_name: string
+          file_url: string
+          created_at?: string
+          file_size_bytes?: number | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          album_id?: string
+          file_name?: string
+          file_url?: string
+          created_at?: string
+          file_size_bytes?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'files_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'files_album_id_fkey'
+            columns: ['album_id']
+            isOneToOne: false
+            referencedRelation: 'albums'
             referencedColumns: ['id']
           },
         ]

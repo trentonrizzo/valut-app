@@ -47,14 +47,14 @@ export function RenameAlbumModal({ open, initialName, onClose, onRename }: Props
 
   return (
     <div
-      className="modal-backdrop"
+      className="modal-backdrop modal-backdrop--mobile-safe"
       role="presentation"
       onClick={() => {
         if (!submitting) onClose()
       }}
     >
       <div
-        className="modal modal--enter"
+        className="modal modal--enter modal--mobile-safe"
         role="dialog"
         aria-modal="true"
         aria-labelledby="rename-album-title"
@@ -79,7 +79,7 @@ export function RenameAlbumModal({ open, initialName, onClose, onRename }: Props
           <input
             id="rename-album-name"
             type="text"
-            className="field-input"
+            className="field-input field-input--modal"
             value={name}
             onChange={(e) => setName(e.target.value)}
             autoComplete="off"

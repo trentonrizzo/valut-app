@@ -559,7 +559,43 @@ button {
   transition: transform 0.25s ease;
 }
 
+.album-card__thumb-inner--media {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.album-card__thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.album-card__video-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
 .album-card--interactive:hover:not(.album-card--busy) .album-card__thumb-inner {
+  transform: scale(1.04);
+}
+
+.album-card--interactive:hover:not(.album-card--busy) .album-card__thumb-inner--media {
   transform: scale(1.04);
 }
 
@@ -579,22 +615,28 @@ button {
   font-weight: 600;
   margin-bottom: 0.35rem;
   overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  word-break: break-word;
+}
+
+.album-card__stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.album-card__stats-line {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  letter-spacing: -0.02em;
-}
-
-.album-card__count {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  margin-bottom: 0.35rem;
-  font-weight: 500;
-}
-
-.album-card__meta {
-  font-size: 0.75rem;
-  color: var(--text-faint);
-  letter-spacing: 0.01em;
 }
 
 .album-card__busy {
@@ -817,6 +859,148 @@ button {
   padding: 1.25rem;
   z-index: 100;
   animation: fadeIn 0.15s ease;
+}
+
+/* Centered modals: safe areas + scroll on short viewports (iPhone) */
+.modal-backdrop--mobile-safe {
+  align-items: safe center;
+  justify-content: safe center;
+  padding-top: max(1rem, env(safe-area-inset-top, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+}
+
+.modal--mobile-safe {
+  width: min(100%, 400px);
+  max-width: calc(100vw - 2rem);
+  max-height: min(90dvh, calc(100dvh - max(2rem, env(safe-area-inset-top) + env(safe-area-inset-bottom))));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: auto;
+  flex-shrink: 0;
+}
+
+.field-input--modal {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  word-break: break-word;
+}
+
+.modal--sheet {
+  width: min(100%, 440px);
+  max-width: calc(100vw - 1.5rem);
+  max-height: min(92dvh, calc(100dvh - max(1.5rem, env(safe-area-inset-top) + env(safe-area-inset-bottom))));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.album-cover-picker__hint {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  margin: 0 0 0.75rem;
+}
+
+.album-cover-picker__status {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.album-cover-picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  max-height: min(50dvh, 320px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.album-cover-picker__row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.album-cover-picker__row:last-child {
+  border-bottom: none;
+}
+
+.album-cover-picker__row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.album-cover-picker__row.is-selected {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.album-cover-picker__thumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #111;
+}
+
+.album-cover-picker__thumb img,
+.album-cover-picker__thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.album-cover-picker__thumb-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  opacity: 0.9;
+}
+
+.album-cover-picker__name {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.album-cover-picker__footer {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.album-cover-picker__remove {
+  align-self: flex-start;
+}
+
+.album-cover-picker__actions {
+  margin-top: 0;
 }
 
 @keyframes fadeIn {
