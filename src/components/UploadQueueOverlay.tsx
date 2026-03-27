@@ -1,8 +1,13 @@
+export type UploadQueueStatus = 'queued' | 'preparing' | 'uploading' | 'done' | 'failed'
+
 export type UploadQueueItem = {
   id: string
   name: string
+  size: number
+  type: string
   progress: number
-  status: 'uploading' | 'failed' | 'done'
+  status: UploadQueueStatus
+  error: string | null
 }
 
 type Props = {
@@ -13,8 +18,26 @@ type Props = {
   currentFileIndex: number
   batchTotal: number
   currentFileName: string | null
+  currentFilePercent: number | null
   onRetry?: (id: string) => void
   onDismiss?: () => void
+}
+
+function statusLabel(status: UploadQueueStatus): string {
+  switch (status) {
+    case 'queued':
+      return 'Queued'
+    case 'preparing':
+      return 'Preparing…'
+    case 'uploading':
+      return 'Uploading'
+    case 'done':
+      return 'Done'
+    case 'failed':
+      return 'Failed'
+    default:
+      return ''
+  }
 }
 
 export function UploadQueueOverlay({
@@ -25,12 +48,16 @@ export function UploadQueueOverlay({
   currentFileIndex,
   batchTotal,
   currentFileName,
+  currentFilePercent,
   onRetry,
   onDismiss,
 }: Props) {
   if (!visible) return null
 
   const hasFailed = items.some((i) => i.status === 'failed')
+  const active = items.some(
+    (i) => i.status === 'queued' || i.status === 'preparing' || i.status === 'uploading',
+  )
 
   return (
     <div className="modal-backdrop vault-upload-overlay" role="presentation">
@@ -39,6 +66,7 @@ export function UploadQueueOverlay({
         role="dialog"
         aria-modal="true"
         aria-labelledby="upload-queue-title"
+        aria-busy={active}
         onClick={(ev) => ev.stopPropagation()}
       >
         <p id="upload-queue-title" className="vault-upload-chip__status">
@@ -62,6 +90,9 @@ export function UploadQueueOverlay({
         {currentFileName ? (
           <p className="vault-upload-chip__name" title={currentFileName}>
             {currentFileName}
+            {currentFilePercent != null && currentFilePercent >= 0 ? (
+              <span className="vault-upload-chip__current-pct"> · {currentFilePercent}%</span>
+            ) : null}
           </p>
         ) : null}
         <div className="vault-upload-chip__bar" aria-label="Overall upload progress">
@@ -79,6 +110,8 @@ export function UploadQueueOverlay({
                   <span className="vault-upload-queue__pct">
                     {item.status === 'failed' ? (
                       <span className="vault-upload-queue__failed">Failed</span>
+                    ) : item.status === 'queued' || item.status === 'preparing' ? (
+                      <span className="vault-upload-queue__phase">{statusLabel(item.status)}</span>
                     ) : (
                       `${item.progress}%`
                     )}
@@ -88,12 +121,27 @@ export function UploadQueueOverlay({
                   <div
                     className="vault-upload-queue__bar-fill"
                     style={{
-                      width: `${item.status === 'failed' ? 0 : item.progress}%`,
+                      width: `${
+                        item.status === 'failed'
+                          ? 0
+                          : item.status === 'queued'
+                            ? 0
+                            : item.progress
+                      }%`,
                     }}
                   />
                 </div>
+                {item.error ? (
+                  <p className="vault-upload-queue__err" role="alert">
+                    {item.error}
+                  </p>
+                ) : null}
                 {item.status === 'failed' && onRetry ? (
-                  <button type="button" className="vault-upload-queue__retry btn btn--ghost" onClick={() => onRetry(item.id)}>
+                  <button
+                    type="button"
+                    className="vault-upload-queue__retry btn btn--ghost"
+                    onClick={() => onRetry(item.id)}
+                  >
                     Retry
                   </button>
                 ) : null}

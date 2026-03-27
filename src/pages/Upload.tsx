@@ -20,6 +20,7 @@ export function Upload() {
   const [uploadBatchIndex, setUploadBatchIndex] = useState(0)
   const [uploadBatchTotal, setUploadBatchTotal] = useState(0)
   const [uploadEtaText, setUploadEtaText] = useState<string | null>(null)
+  const [uploadCurrentFilePercent, setUploadCurrentFilePercent] = useState<number | null>(null)
   const uploadStartMsRef = useRef(0)
   const uploadTotalBytesRef = useRef(0)
   const uploadLockRef = useRef(false)
@@ -68,6 +69,7 @@ export function Upload() {
     setUploadBatchIndex(0)
     setUploadBatchTotal(0)
     setUploadEtaText(null)
+    setUploadCurrentFilePercent(null)
   }, [])
 
   const runUpload = useCallback(
@@ -82,6 +84,7 @@ export function Upload() {
       let fileIds: (string | null)[]
       let failed: string[]
       let total: number
+      let errors: (string | null)[]
 
       try {
         const r = await batchUploadFilesToAlbum(
@@ -95,6 +98,7 @@ export function Upload() {
             setUploadBatchIndex(p.batchIndex)
             setUploadBatchTotal(p.batchTotal)
             setUploadEtaText(p.etaText)
+            if (p.currentFilePercent != null) setUploadCurrentFilePercent(p.currentFilePercent)
             const idx = p.currentFileIndex - 1
             if (idx >= 0 && idx < queueIds.length) {
               const targetId = queueIds[idx]!
@@ -105,25 +109,46 @@ export function Upload() {
                         ...item,
                         progress: p.currentFilePercent ?? item.progress,
                         name: p.fileName ?? item.name,
+                        status:
+                          item.status === 'queued'
+                            ? 'uploading'
+                            : item.status === 'preparing'
+                              ? 'uploading'
+                              : item.status,
                       }
                     : item,
                 ),
               )
             }
           },
+          {
+            onFilePhase: (fileIndex, phase) => {
+              const targetId = queueIds[fileIndex]
+              if (!targetId) return
+              setUploadQueueItems((prev) =>
+                prev.map((item) => {
+                  if (item.id !== targetId) return item
+                  if (phase === 'preparing') return { ...item, status: 'preparing' }
+                  return { ...item, status: 'uploading', progress: Math.max(item.progress, 12) }
+                }),
+              )
+            },
+          },
         )
         fileIds = r.fileIds
         failed = r.failed
         total = r.total
+        errors = r.errors
       } catch (e) {
         console.error(e)
+        const msg = e instanceof Error ? e.message : 'Upload failed'
         queueIds.forEach((qid) => fileByQueueIdRef.current.delete(qid))
         setUploadQueueItems((prev) =>
           prev.map((item) =>
-            queueIds.includes(item.id) ? { ...item, status: 'failed' } : item,
+            queueIds.includes(item.id) ? { ...item, status: 'failed', error: msg } : item,
           ),
         )
-        showToast(e instanceof Error ? e.message : 'Upload failed', 'error')
+        showToast(msg, 'error')
         finishUploadUi()
         return
       }
@@ -132,8 +157,13 @@ export function Upload() {
         prev.map((item) => {
           const i = queueIds.indexOf(item.id)
           if (i === -1) return item
-          if (fileIds[i]) return { ...item, status: 'done', progress: 100 }
-          return { ...item, status: 'failed', progress: item.progress }
+          if (fileIds[i]) return { ...item, status: 'done', progress: 100, error: null }
+          return {
+            ...item,
+            status: 'failed',
+            progress: item.progress,
+            error: errors[i] ?? 'Upload failed',
+          }
         }),
       )
 
@@ -177,7 +207,9 @@ export function Upload() {
       const file = fileByQueueIdRef.current.get(queueId)
       if (!file || !user || !albumId) return
       setUploadQueueItems((prev) =>
-        prev.map((it) => (it.id === queueId ? { ...it, status: 'uploading', progress: 0 } : it)),
+        prev.map((it) =>
+          it.id === queueId ? { ...it, status: 'queued', progress: 0, error: null } : it,
+        ),
       )
       setUploading(true)
       uploadLockRef.current = true
@@ -186,9 +218,12 @@ export function Upload() {
       setUploadBatchTotal(1)
       setUploadBatchIndex(1)
       setUploadEtaText(null)
-      setTimeout(() => {
-        void runUpload([file], [queueId])
-      }, 0)
+      setUploadCurrentFilePercent(0)
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          void runUpload([file], [queueId])
+        }, 0)
+      })
     },
     [user, albumId, runUpload],
   )
@@ -252,8 +287,11 @@ export function Upload() {
                 const queueItems: UploadQueueItem[] = queueIds.map((id, i) => ({
                   id,
                   name: filesArray[i]!.name,
+                  size: filesArray[i]!.size,
+                  type: filesArray[i]!.type || 'application/octet-stream',
                   progress: 0,
-                  status: 'uploading',
+                  status: 'queued',
+                  error: null,
                 }))
 
                 setUploadQueueItems((prev) => [...queueItems, ...prev])
@@ -263,11 +301,14 @@ export function Upload() {
                 setUploadBatchTotal(filesArray.length)
                 setUploadBatchIndex(1)
                 setUploadEtaText(null)
+                setUploadCurrentFilePercent(0)
 
                 uploadLockRef.current = true
-                setTimeout(() => {
-                  void runUpload(filesArray, queueIds)
-                }, 0)
+                requestAnimationFrame(() => {
+                  setTimeout(() => {
+                    void runUpload(filesArray, queueIds)
+                  }, 0)
+                })
               }}
             />
           </label>
@@ -276,13 +317,19 @@ export function Upload() {
       )}
 
       <UploadQueueOverlay
-        visible={uploading || uploadQueueItems.some((i) => i.status === 'failed')}
+        visible={
+          uploading ||
+          uploadQueueItems.some((i) =>
+            ['queued', 'preparing', 'uploading', 'failed'].includes(i.status),
+          )
+        }
         items={uploadQueueItems}
         overallProgress={uploadProgress}
         etaText={uploadEtaText}
         currentFileIndex={uploadBatchIndex}
         batchTotal={uploadBatchTotal}
         currentFileName={uploadFileName}
+        currentFilePercent={uploadCurrentFilePercent}
         onRetry={retryUploadQueueItem}
         onDismiss={dismissFailedUploadQueue}
       />

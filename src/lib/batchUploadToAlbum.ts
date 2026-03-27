@@ -1,9 +1,17 @@
 import type { MutableRefObject } from 'react'
 import { supabase } from './supabase'
 import { encryptFile, ensureEncryptionKey } from './vaultCrypto'
+import { isVideoFileName } from './mediaTypes'
 
 /** Max single-file size before upload (approximate safety limit). */
 export const MAX_UPLOAD_FILE_BYTES = 200 * 1024 * 1024
+
+/** Videos at or above this size run with at most one concurrent large-video job (plus one smaller file). */
+export const LARGE_VIDEO_BYTES = 32 * 1024 * 1024
+
+export function isLargeVideoFile(file: File): boolean {
+  return isVideoFileName(file.name) && file.size >= LARGE_VIDEO_BYTES
+}
 
 export type BatchUploadProgress = {
   progress: number
@@ -17,6 +25,8 @@ export type BatchUploadProgress = {
   currentFilePercent?: number
 }
 
+export type BatchUploadFilePhase = 'preparing' | 'uploading'
+
 export type FilePurpose = 'content' | 'cover'
 
 export type BatchUploadResult = {
@@ -24,6 +34,8 @@ export type BatchUploadResult = {
   total: number
   /** Same order as input files; null where that index failed */
   fileIds: (string | null)[]
+  /** Human-readable error per index, or null if ok */
+  errors: (string | null)[]
 }
 
 type Refs = {
@@ -90,6 +102,32 @@ async function putBlobToR2(
   })
 }
 
+function canStartWithActive(file: File, activeChosen: File[]): boolean {
+  if (activeChosen.length >= 2) return false
+  const largeActive = activeChosen.filter(isLargeVideoFile).length
+  if (isLargeVideoFile(file) && largeActive >= 1) return false
+  return true
+}
+
+/**
+ * Pick next batch (max 2 files) that may run in parallel respecting large-video rule.
+ */
+function pickNextBatch(filesArray: File[], pending: number[]): number[] {
+  const batch: number[] = []
+  for (const i of [...pending]) {
+    const chosen = batch.map((idx) => filesArray[idx]!)
+    if (canStartWithActive(filesArray[i]!, chosen)) {
+      batch.push(i)
+      if (batch.length >= 2) break
+    }
+  }
+  for (const i of batch) {
+    const pos = pending.indexOf(i)
+    if (pos !== -1) pending.splice(pos, 1)
+  }
+  return batch
+}
+
 /**
  * Upload one encrypted file to R2, insert as purpose=cover, set albums.cover_file_id.
  */
@@ -137,15 +175,15 @@ export async function uploadCoverAndSetAlbum(
         }
       }
     }
-  onProgress({
-    progress: pct,
-    fileName: file.name,
-    batchIndex: 1,
-    batchTotal: 1,
-    etaText,
-    currentFileIndex: 1,
-    currentFilePercent: pct,
-  })
+    onProgress({
+      progress: pct,
+      fileName: file.name,
+      batchIndex: 1,
+      batchTotal: 1,
+      etaText,
+      currentFileIndex: 1,
+      currentFilePercent: pct,
+    })
   })
 
   const { data, error: insertError } = await supabase
@@ -187,11 +225,14 @@ export async function uploadCoverAndSetAlbum(
   return { fileId: data.id }
 }
 
-const UPLOAD_CONCURRENCY = 2
+function humanError(e: unknown): string {
+  if (e instanceof Error) return e.message
+  return 'Something went wrong'
+}
 
 /**
  * Uploads files to R2 + inserts metadata (encrypted ciphertext).
- * At most UPLOAD_CONCURRENCY files are encrypted/uploaded at a time (memory-safe for large videos).
+ * Runs in waves of up to 2 files; at most one large video (≥32MB) per wave.
  */
 export async function batchUploadFilesToAlbum(
   filesArray: File[],
@@ -199,17 +240,30 @@ export async function batchUploadFilesToAlbum(
   userId: string,
   refs: Refs,
   onProgress: (p: BatchUploadProgress) => void,
-  options?: { purpose?: FilePurpose },
+  options?: {
+    purpose?: FilePurpose
+    onFilePhase?: (fileIndex: number, phase: BatchUploadFilePhase) => void
+  },
 ): Promise<BatchUploadResult> {
   const purpose: FilePurpose = options?.purpose ?? 'content'
+  const onFilePhase = options?.onFilePhase
   const total = filesArray.length
   if (total === 0) {
-    return { failed: [], total: 0, fileIds: [] }
+    return { failed: [], total: 0, fileIds: [], errors: [] }
   }
 
   if (!validateUploadFileSizes(filesArray)) {
-    return { failed: filesArray.map((f) => f.name), total, fileIds: new Array(total).fill(null) }
+    return {
+      failed: filesArray.map((f) => f.name),
+      total,
+      fileIds: new Array(total).fill(null),
+      errors: filesArray.map(() => 'File too large'),
+    }
   }
+
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => setTimeout(resolve, 0))
+  })
 
   const key = await ensureEncryptionKey(userId)
 
@@ -219,6 +273,7 @@ export async function batchUploadFilesToAlbum(
 
   const failed: string[] = []
   const fileIds: (string | null)[] = new Array(total).fill(null)
+  const errors: (string | null)[] = new Array(total).fill(null)
   /** Per-file completion weight 0–1 for overall progress */
   const weight = new Float64Array(total)
 
@@ -257,20 +312,24 @@ export async function batchUploadFilesToAlbum(
   async function uploadSingleFile(fileIndex: number): Promise<void> {
     const file = filesArray[fileIndex]!
 
-    weight[fileIndex] = 0.05
-    emitProgress(fileIndex, file.name, 5)
+    weight[fileIndex] = 0.02
+    emitProgress(fileIndex, file.name, 2)
+    onFilePhase?.(fileIndex, 'preparing')
 
     let encryptedBlob: Blob
     try {
       encryptedBlob = await encryptFile(file, key)
     } catch (e) {
+      const msg = humanError(e)
       failed.push(file.name)
+      errors[fileIndex] = `Could not encrypt: ${msg}`
       weight[fileIndex] = 0
       console.error('Encrypt failed for file:', file.name, e)
       emitProgress(fileIndex, file.name, 0)
       return
     }
 
+    onFilePhase?.(fileIndex, 'uploading')
     weight[fileIndex] = 0.1
     emitProgress(fileIndex, file.name, 12)
 
@@ -306,22 +365,16 @@ export async function batchUploadFilesToAlbum(
       weight[fileIndex] = 1
       emitProgress(fileIndex, file.name, 100)
     } catch (e) {
+      const msg = humanError(e)
       failed.push(file.name)
+      errors[fileIndex] = msg
       weight[fileIndex] = 0
       console.error('Upload failed for file:', file.name, e)
       emitProgress(fileIndex, file.name, 0)
     }
   }
 
-  let nextIndex = 0
-
-  async function worker(): Promise<void> {
-    while (true) {
-      const i = nextIndex++
-      if (i >= total) return
-      await uploadSingleFile(i)
-    }
-  }
+  const pending = [...Array(total).keys()]
 
   onProgress({
     progress: 0,
@@ -333,7 +386,20 @@ export async function batchUploadFilesToAlbum(
     currentFilePercent: 0,
   })
 
-  await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, () => worker()))
+  while (pending.length > 0) {
+    const batch = pickNextBatch(filesArray, pending)
+    if (batch.length === 0) {
+      console.error('batchUploadFilesToAlbum: could not schedule remaining files', pending)
+      for (const i of pending) {
+        const file = filesArray[i]!
+        failed.push(file.name)
+        errors[i] = 'Could not schedule upload'
+        weight[i] = 0
+      }
+      break
+    }
+    await Promise.all(batch.map((i) => uploadSingleFile(i)))
+  }
 
   onProgress({
     progress: 100,
@@ -345,5 +411,5 @@ export async function batchUploadFilesToAlbum(
     currentFilePercent: 100,
   })
 
-  return { failed, total, fileIds }
+  return { failed, total, fileIds, errors }
 }

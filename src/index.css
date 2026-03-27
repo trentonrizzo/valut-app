@@ -1636,6 +1636,11 @@ button {
   text-overflow: ellipsis;
 }
 
+.vault-upload-chip__current-pct {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
 .vault-upload-chip__eta {
   margin: 0.25rem 0 0;
   font-size: 0.72rem;
@@ -1708,6 +1713,19 @@ button {
 .vault-upload-queue__failed {
   color: #f87171;
   font-weight: 600;
+}
+
+.vault-upload-queue__phase {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: rgba(180, 200, 255, 0.95);
+}
+
+.vault-upload-queue__err {
+  margin: 0.3rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: #f87171;
 }
 
 .vault-upload-queue__bar {
