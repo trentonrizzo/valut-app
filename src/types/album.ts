@@ -12,4 +12,6 @@ export type AlbumWithMeta = AlbumRow & {
   previewIsEncrypted: boolean
   /** Original filename of the preview asset (for MIME when decrypting). */
   previewFileName: string | null
+  /** File id for the preview asset (decrypt cache). */
+  previewFileId: string | null
 }

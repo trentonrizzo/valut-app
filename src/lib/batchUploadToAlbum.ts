@@ -12,6 +12,13 @@ export type BatchUploadProgress = {
 
 export type FilePurpose = 'content' | 'cover'
 
+export type BatchUploadResult = {
+  failed: string[]
+  total: number
+  /** Same order as input files; null where that index failed */
+  fileIds: (string | null)[]
+}
+
 type Refs = {
   uploadStartMsRef: MutableRefObject<number>
   uploadTotalBytesRef: MutableRefObject<number>
@@ -36,8 +43,8 @@ async function presignUpload(fileName: string): Promise<{ uploadUrl: string; fil
 async function putBlobToR2(
   body: Blob,
   uploadUrl: string,
-  totalBytes: number,
-  completedBytes: number,
+  totalBytesAll: number,
+  fileStartOffset: number,
   index: number,
   total: number,
   refs: Refs,
@@ -50,16 +57,16 @@ async function putBlobToR2(
     xhr.setRequestHeader('Content-Type', 'application/octet-stream')
 
     xhr.upload.onprogress = (event) => {
-      if (!event.lengthComputable || totalBytes <= 0) return
-      const totalDone = completedBytes + event.loaded
-      const overallPct = Math.round((totalDone / totalBytes) * 100)
+      if (!event.lengthComputable || totalBytesAll <= 0) return
+      const totalDone = fileStartOffset + event.loaded
+      const overallPct = Math.round((totalDone / totalBytesAll) * 100)
 
       let etaText: string | null = null
       const elapsed = Date.now() - refs.uploadStartMsRef.current
       if (elapsed > 2500 && overallPct > 2 && overallPct < 99) {
         const rate = totalDone / elapsed
         if (rate > 0) {
-          const remainingMs = (totalBytes - totalDone) / rate
+          const remainingMs = (totalBytesAll - totalDone) / rate
           if (remainingMs > 4000 && remainingMs < 1000 * 60 * 60 * 4) {
             const sec = Math.ceil(remainingMs / 1000)
             etaText = sec < 60 ? `~${sec}s left` : `~${Math.round(sec / 60)}m left`
@@ -135,6 +142,7 @@ export async function uploadCoverAndSetAlbum(
       file_size_bytes: file.size,
       purpose: 'cover',
       is_encrypted: true,
+      mime_type: file.type || null,
     })
     .select('id')
     .single()
@@ -162,7 +170,7 @@ export async function uploadCoverAndSetAlbum(
 }
 
 /**
- * Uploads files to R2 + inserts metadata (encrypted ciphertext).
+ * Uploads files to R2 + inserts metadata (encrypted ciphertext). Uploads run in parallel.
  */
 export async function batchUploadFilesToAlbum(
   filesArray: File[],
@@ -171,24 +179,32 @@ export async function batchUploadFilesToAlbum(
   refs: Refs,
   onProgress: (p: BatchUploadProgress) => void,
   options?: { purpose?: FilePurpose },
-): Promise<{ failed: string[]; total: number }> {
+): Promise<BatchUploadResult> {
   const purpose: FilePurpose = options?.purpose ?? 'content'
   const total = filesArray.length
+  if (total === 0) {
+    return { failed: [], total: 0, fileIds: [] }
+  }
+
   const key = await ensureEncryptionKey(userId)
 
-  const encryptedParts: { blob: Blob; file: File }[] = []
-  for (const file of filesArray) {
-    const blob = await encryptFile(file, key)
-    encryptedParts.push({ blob, file })
-  }
+  const encryptedParts = await Promise.all(
+    filesArray.map(async (file) => ({
+      blob: await encryptFile(file, key),
+      file,
+    })),
+  )
 
   const totalBytes = encryptedParts.reduce((s, x) => s + x.blob.size, 0)
   refs.uploadTotalBytesRef.current = totalBytes
   refs.uploadStartMsRef.current = Date.now()
 
-  let index = 0
-  let completedBytes = 0
-  const failed: string[] = []
+  const offsets: number[] = []
+  let off = 0
+  for (const { blob } of encryptedParts) {
+    offsets.push(off)
+    off += blob.size
+  }
 
   onProgress({
     progress: 0,
@@ -198,24 +214,19 @@ export async function batchUploadFilesToAlbum(
     etaText: null,
   })
 
-  for (const { blob, file } of encryptedParts) {
-    index += 1
-    onProgress({
-      progress: Math.round(((index - 1) / total) * 100),
-      fileName: file.name,
-      batchIndex: index,
-      batchTotal: total,
-      etaText: null,
-    })
+  const failed: string[] = []
+  const fileIds: (string | null)[] = new Array(total).fill(null)
 
-    try {
+  const settled = await Promise.allSettled(
+    encryptedParts.map(async ({ blob, file }, i) => {
+      const index = i + 1
       const { uploadUrl, fileUrl } = await presignUpload(file.name)
 
       await putBlobToR2(
         blob,
         uploadUrl,
         totalBytes,
-        completedBytes,
+        offsets[i],
         index,
         total,
         refs,
@@ -223,22 +234,35 @@ export async function batchUploadFilesToAlbum(
         file.name,
       )
 
-      completedBytes += blob.size
-
-      const { error: insertError } = await supabase.from('files').insert({
-        user_id: userId,
-        album_id: albumId,
-        file_name: file.name,
-        file_url: fileUrl,
-        file_size_bytes: file.size,
-        purpose,
-        is_encrypted: true,
-      })
+      const { data, error: insertError } = await supabase
+        .from('files')
+        .insert({
+          user_id: userId,
+          album_id: albumId,
+          file_name: file.name,
+          file_url: fileUrl,
+          file_size_bytes: file.size,
+          purpose,
+          is_encrypted: true,
+          mime_type: file.type || null,
+        })
+        .select('id')
+        .single()
 
       if (insertError) throw new Error(insertError.message)
-    } catch (err) {
-      failed.push(file.name)
-      console.error('Upload failed for file:', file.name, err)
+      if (!data?.id) throw new Error('Insert did not return file id')
+
+      return data.id
+    }),
+  )
+
+  for (let i = 0; i < settled.length; i++) {
+    const r = settled[i]
+    if (r.status === 'fulfilled') {
+      fileIds[i] = r.value
+    } else {
+      failed.push(filesArray[i].name)
+      console.error('Upload failed for file:', filesArray[i].name, r.reason)
     }
   }
 
@@ -250,5 +274,5 @@ export async function batchUploadFilesToAlbum(
     etaText: null,
   })
 
-  return { failed, total }
+  return { failed, total, fileIds }
 }

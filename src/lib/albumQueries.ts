@@ -45,6 +45,7 @@ function previewForAlbum(album: AlbumRow, byAlbum: Map<string, FileRowForAlbumMe
   previewIsVideo: boolean
   previewIsEncrypted: boolean
   previewFileName: string | null
+  previewFileId: string | null
 } {
   const all = byAlbum.get(album.id) ?? []
   const contentOnly = all.filter(isContentFile)
@@ -59,7 +60,13 @@ function previewForAlbum(album: AlbumRow, byAlbum: Map<string, FileRowForAlbumMe
   }
 
   if (!file) {
-    return { previewUrl: null, previewIsVideo: false, previewIsEncrypted: false, previewFileName: null }
+    return {
+      previewUrl: null,
+      previewIsVideo: false,
+      previewIsEncrypted: false,
+      previewFileName: null,
+      previewFileId: null,
+    }
   }
 
   return {
@@ -67,6 +74,7 @@ function previewForAlbum(album: AlbumRow, byAlbum: Map<string, FileRowForAlbumMe
     previewIsVideo: isVideoFileName(file.file_name),
     previewIsEncrypted: file.is_encrypted === true,
     previewFileName: file.file_name,
+    previewFileId: file.id,
   }
 }
 
@@ -88,10 +96,8 @@ export function buildAlbumsWithMeta(
 
   return albums.map((album) => {
     const list = byAlbum.get(album.id) ?? []
-    const { previewUrl, previewIsVideo, previewIsEncrypted, previewFileName } = previewForAlbum(
-      album,
-      byAlbum,
-    )
+    const { previewUrl, previewIsVideo, previewIsEncrypted, previewFileName, previewFileId } =
+      previewForAlbum(album, byAlbum)
     return {
       ...album,
       itemCount: countContentFiles(list),
@@ -100,6 +106,7 @@ export function buildAlbumsWithMeta(
       previewIsVideo,
       previewIsEncrypted,
       previewFileName,
+      previewFileId,
     }
   })
 }

@@ -68,6 +68,7 @@ export interface Database {
           file_size_bytes: number | null
           purpose: string
           is_encrypted: boolean
+          mime_type: string | null
         }
         Insert: {
           id?: string
@@ -79,6 +80,7 @@ export interface Database {
           file_size_bytes?: number | null
           purpose?: string
           is_encrypted?: boolean
+          mime_type?: string | null
         }
         Update: {
           id?: string
@@ -90,6 +92,7 @@ export interface Database {
           file_size_bytes?: number | null
           purpose?: string
           is_encrypted?: boolean
+          mime_type?: string | null
         }
         Relationships: [
           {

@@ -40,6 +40,7 @@ export function AlbumCard({
     album.previewIsEncrypted,
     userId,
     album.previewFileName ?? '',
+    album.previewFileId,
   )
 
   function openIfNotHandle(e: React.MouseEvent | React.KeyboardEvent) {
@@ -121,8 +122,9 @@ export function AlbumCard({
           {album.name}
         </h2>
         <div className="album-card__stats" aria-label="Album size and item count">
-          <span className="album-card__stats-line">{formatItemCount(album.itemCount)}</span>
-          <span className="album-card__stats-line">{formatBytes(album.totalBytes)}</span>
+          <span className="album-card__stats-line">
+            {formatItemCount(album.itemCount)} <span aria-hidden>•</span> {formatBytes(album.totalBytes)}
+          </span>
         </div>
       </div>
       {busy ? (

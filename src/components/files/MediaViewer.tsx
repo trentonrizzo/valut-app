@@ -37,6 +37,7 @@ export function MediaViewer({ open, userId, files, index, onClose, onIndexChange
     file?.is_encrypted,
     userId,
     file?.file_name ?? '',
+    file?.id,
   )
 
   const mediaSrc = displaySrc ?? (file?.is_encrypted === true ? undefined : file?.file_url)
@@ -84,10 +85,7 @@ export function MediaViewer({ open, userId, files, index, onClose, onIndexChange
     if (!open || !isVideo) return
     const el = videoRef.current
     if (!el) return
-
     el.playbackRate = playbackRate
-    // Autoplay when opened. Some browsers require user gesture; we still attempt.
-    void el.play().catch(() => {})
   }, [open, isVideo, playbackRate, index, mediaSrc])
 
   const resetPullDismiss = useCallback(() => {
@@ -386,16 +384,20 @@ export function MediaViewer({ open, userId, files, index, onClose, onIndexChange
 
           <div
             ref={viewportRef}
-            className="media-viewer__viewport"
-            onWheel={onWheel}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={(e) => {
-              pointerMap.current.delete(e.pointerId)
-              resetPullDismiss()
-              resetDrag()
-            }}
+            className={`media-viewer__viewport${isVideo ? ' media-viewer__viewport--video' : ''}`}
+            onWheel={isVideo ? undefined : onWheel}
+            onPointerDown={isVideo ? undefined : onPointerDown}
+            onPointerMove={isVideo ? undefined : onPointerMove}
+            onPointerUp={isVideo ? undefined : onPointerUp}
+            onPointerCancel={
+              isVideo
+                ? undefined
+                : (e) => {
+                    pointerMap.current.delete(e.pointerId)
+                    resetPullDismiss()
+                    resetDrag()
+                  }
+            }
             onDoubleClick={onDoubleClick}
           >
             {isVideo ? (
@@ -406,7 +408,6 @@ export function MediaViewer({ open, userId, files, index, onClose, onIndexChange
                   className="media-viewer__video"
                   src={mediaSrc}
                   controls
-                  autoPlay
                   loop={videoLoop}
                   playsInline
                   preload="metadata"

@@ -21,14 +21,16 @@ function CoverPickerThumb({
   isEncrypted,
   userId,
   isVid,
+  fileId,
 }: {
   fileUrl: string
   fileName: string
   isEncrypted: boolean
   userId: string
   isVid: boolean
+  fileId: string
 }) {
-  const src = useDecryptedMediaSrc(fileUrl, isEncrypted, userId, fileName)
+  const src = useDecryptedMediaSrc(fileUrl, isEncrypted, userId, fileName, fileId)
   const mediaSrc = src ?? (!isEncrypted ? fileUrl : null)
   return (
     <span className="album-cover-picker__thumb">
@@ -333,6 +335,7 @@ export function AlbumCoverPickerModal({ open, album, userId, onClose, onSaved, o
                           isEncrypted={f.is_encrypted === true}
                           userId={userId}
                           isVid={isVid}
+                          fileId={f.id}
                         />
                         <span className="album-cover-picker__name">
                           {f.file_name}

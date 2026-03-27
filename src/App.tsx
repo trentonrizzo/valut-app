@@ -28,6 +28,7 @@ export default function App() {
               }
             >
               <Route path="albums" element={<Dashboard />} />
+              <Route path="albums/:albumId" element={<Dashboard />} />
               <Route path="upload" element={<Upload />} />
               <Route path="settings" element={<Settings />} />
             </Route>

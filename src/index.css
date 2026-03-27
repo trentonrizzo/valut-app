@@ -617,42 +617,42 @@ button {
 .album-card__body {
   flex: 1 1 0;
   min-height: 0;
-  padding: 0.45rem 0.6rem 0.5rem;
+  padding: 0.22rem 0.6rem 0.28rem;
   text-align: left;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.12rem;
+  gap: 0.06rem;
 }
 
 .album-card__title {
-  font-size: 0.94rem;
-  font-weight: 600;
+  font-size: 0.9375rem;
+  font-weight: 500;
   margin: 0;
+  color: #fff;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  line-height: 1.22;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.25;
   letter-spacing: -0.02em;
-  word-break: break-word;
+  min-width: 0;
 }
 
 .album-card__stats {
   display: flex;
   flex-direction: column;
-  gap: 0.06rem;
   min-width: 0;
 }
 
 .album-card__stats-line {
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   line-height: 1.2;
   color: var(--text-faint);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: 0.55;
 }
 
 .album-card__busy {
@@ -1718,6 +1718,10 @@ button {
   height: 100%;
 }
 
+.vault-photo-tile__media--pending {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .vault-photo-tile__media img,
 .vault-photo-tile__media video {
   width: 100%;
@@ -1972,6 +1976,15 @@ button {
   cursor: grabbing;
 }
 
+.media-viewer__viewport--video {
+  touch-action: manipulation;
+  cursor: default;
+}
+
+.media-viewer__viewport--video:active {
+  cursor: default;
+}
+
 .media-viewer__image-wrap {
   width: 100%;
   height: 100%;
@@ -1991,6 +2004,8 @@ button {
 
 .media-viewer__video {
   animation: mediaFadeIn 0.18s ease both;
+  touch-action: manipulation;
+  pointer-events: auto;
 }
 
 .media-viewer__video,

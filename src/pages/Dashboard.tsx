@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
@@ -12,8 +13,10 @@ import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
 import { AlbumCoverPickerModal } from '../components/albums/AlbumCoverPickerModal'
 import { MediaViewer } from '../components/files/MediaViewer'
+import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
 import { UploadProgressOverlay } from '../components/UploadProgressOverlay'
 import { batchUploadFilesToAlbum } from '../lib/batchUploadToAlbum'
+import { setDecryptedBlobUrlForFile } from '../lib/decryptedBlobCache'
 
 const GALLERY_COLS_KEY = 'vault-gallery-grid-cols'
 type GalleryCols = 1 | 2 | 3 | 4 | 5
@@ -51,6 +54,9 @@ function GridColsIcon({ cols }: { cols: number }) {
 export function Dashboard() {
   const { user } = useAuth()
   const { showToast } = useToast()
+  const { albumId: albumIdParam } = useParams<{ albumId?: string }>()
+  const navigate = useNavigate()
+  const openAlbumId = albumIdParam ?? null
 
   const [albums, setAlbums] = useState<AlbumWithMeta[]>([])
   const [loading, setLoading] = useState(true)
@@ -63,7 +69,6 @@ export function Dashboard() {
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set())
   const [creatingAlbum, setCreatingAlbum] = useState(false)
 
-  const [openAlbumId, setOpenAlbumId] = useState<string | null>(null)
   type FileRow = {
     id: string
     user_id: string
@@ -74,6 +79,7 @@ export function Dashboard() {
     file_size_bytes?: number | null
     purpose?: string | null
     is_encrypted?: boolean | null
+    mime_type?: string | null
   }
 
   function isGalleryFile(f: FileRow): boolean {
@@ -258,7 +264,7 @@ export function Dashboard() {
     setViewerIndex(0)
     setViewerFileId(null)
     setFileSort('newest')
-  }, [openAlbumId])
+  }, [albumIdParam])
 
   useEffect(() => {
     if (!viewerOpen || !viewerFileId) return
@@ -354,6 +360,7 @@ export function Dashboard() {
       previewIsVideo: false,
       previewIsEncrypted: false,
       previewFileName: null,
+      previewFileId: null,
       order_index: nextOrder,
       cover_file_id: null,
     }
@@ -372,7 +379,7 @@ export function Dashboard() {
 
       const real = buildAlbumsWithMeta([data as AlbumRow], [])[0]
       setAlbums((prev) => prev.map((a) => (a.id === tempId ? real : a)))
-      setOpenAlbumId(real.id)
+      navigate(`/albums/${real.id}`)
       showToast('Album created')
     } catch (e) {
       setAlbums((prev) => prev.filter((a) => a.id !== tempId))
@@ -422,7 +429,7 @@ export function Dashboard() {
       const { error } = await supabase.from('albums').delete().eq('id', id).eq('user_id', user.id)
       if (error) throw new Error(error.message)
       setAlbums((prev) => prev.filter((a) => a.id !== id))
-      if (openAlbumId === id) setOpenAlbumId(null)
+      if (openAlbumId === id) navigate('/albums')
       setDeleteTarget(null)
       showToast('Album deleted')
     } catch (e) {
@@ -436,7 +443,7 @@ export function Dashboard() {
   return (
     <div className="dashboard">
       <main className="dashboard__main">
-        {!openAlbum ? (
+        {!openAlbumId ? (
           <>
             <div className="dashboard__toolbar">
               <div>
@@ -490,7 +497,7 @@ export function Dashboard() {
                 columns={columns}
                 busyAlbumIds={busyIds}
                 activeAlbumId={openAlbumId}
-                onOpen={(album) => setOpenAlbumId(album.id)}
+                onOpen={(album) => navigate(`/albums/${album.id}`)}
                 onRename={(a) => setRenameTarget(a)}
                 onDelete={(a) => setDeleteTarget(a)}
                 onSetCover={(a) => setCoverPickerAlbum(a)}
@@ -505,12 +512,12 @@ export function Dashboard() {
               <button
                 type="button"
                 className="btn btn--ghost vault-gallery-toolbar__back"
-                onClick={() => setOpenAlbumId(null)}
+                onClick={() => navigate('/albums')}
               >
                 ← All albums
               </button>
               <div className="vault-gallery-toolbar__title">
-                <h2 className="vault-gallery-toolbar__name">{openAlbum.name}</h2>
+                <h2 className="vault-gallery-toolbar__name">{openAlbum?.name ?? 'Album'}</h2>
                 <span className="vault-gallery-toolbar__count" aria-label="Item count">
                   {files.length === 0
                     ? 'Empty'
@@ -547,16 +554,16 @@ export function Dashboard() {
                   <option value="images_first">Images first</option>
                   <option value="videos_first">Videos first</option>
                 </select>
-                <label className="btn btn--outline vault-upload-btn vault-upload-btn--toolbar" aria-disabled={uploading || !openAlbum}>
+                <label className="btn btn--outline vault-upload-btn vault-upload-btn--toolbar" aria-disabled={uploading || !openAlbumId}>
                   Upload
                   <input
                   type="file"
                   accept="image/*,video/*"
                   multiple
-                  disabled={uploading || !openAlbum}
+                  disabled={uploading || !openAlbumId}
                   onChange={(e) => {
                     const list = e.target.files
-                    if (list && openAlbum) {
+                    if (list && openAlbumId) {
                       const filesArray = Array.from(list)
                       void (async () => {
                         if (filesArray.length === 0) return
@@ -564,6 +571,26 @@ export function Dashboard() {
                           showToast('Please sign in to upload.', 'error')
                           return
                         }
+
+                        const optimisticUrls: string[] = []
+                        const optimisticRows: FileRow[] = filesArray.map((f) => {
+                          const url = URL.createObjectURL(f)
+                          optimisticUrls.push(url)
+                          return {
+                            id: `optimistic-${crypto.randomUUID()}`,
+                            user_id: user.id,
+                            album_id: openAlbumId,
+                            file_name: f.name,
+                            file_url: url,
+                            created_at: new Date().toISOString(),
+                            file_size_bytes: f.size,
+                            purpose: 'content',
+                            is_encrypted: false,
+                            mime_type: f.type || null,
+                          }
+                        })
+
+                        setFiles((prev) => [...optimisticRows, ...prev])
 
                         setUploading(true)
                         setUploadProgress(0)
@@ -573,9 +600,9 @@ export function Dashboard() {
                         setUploadEtaText(null)
 
                         try {
-                          const { failed, total } = await batchUploadFilesToAlbum(
+                          const { failed, total, fileIds } = await batchUploadFilesToAlbum(
                             filesArray,
-                            openAlbum.id,
+                            openAlbumId,
                             user.id,
                             { uploadStartMsRef, uploadTotalBytesRef },
                             (p) => {
@@ -587,10 +614,16 @@ export function Dashboard() {
                             },
                           )
 
+                          for (let i = 0; i < filesArray.length; i++) {
+                            const fid = fileIds[i]
+                            if (fid) setDecryptedBlobUrlForFile(fid, optimisticUrls[i])
+                            else URL.revokeObjectURL(optimisticUrls[i])
+                          }
+
                           const { data, error: selectError } = await supabase
                             .from('files')
                             .select('*')
-                            .eq('album_id', openAlbum.id)
+                            .eq('album_id', openAlbumId)
                             .eq('user_id', user.id)
                             .order('created_at', { ascending: false })
 
@@ -617,6 +650,8 @@ export function Dashboard() {
                             )
                           }
                         } catch (err) {
+                          optimisticUrls.forEach((u) => URL.revokeObjectURL(u))
+                          setFiles((prev) => prev.filter((row) => !row.id.startsWith('optimistic-')))
                           showToast(err instanceof Error ? err.message : 'Upload failed', 'error')
                           console.error(err)
                         } finally {
@@ -702,11 +737,9 @@ export function Dashboard() {
                       aria-label={`Open ${f.file_name}`}
                     >
                       <div className="vault-photo-tile__media">
-                        {isVideo ? (
-                          <video src={f.file_url} muted playsInline preload="metadata" />
-                        ) : (
-                          <img src={f.file_url} alt="" loading="lazy" />
-                        )}
+                        {user ? (
+                          <VaultPhotoTileMedia file={f} userId={user.id} />
+                        ) : null}
                       </div>
                       {isVideo ? (
                         <span className="vault-photo-tile__video-glyph" aria-hidden title="Video">
@@ -823,7 +856,13 @@ export function Dashboard() {
                     </div>
                     <div>
                       <dt>Type</dt>
-                      <dd>{isVideoFileName(fileInfoTarget.file_name) ? 'Video' : 'Image'}</dd>
+                      <dd>
+                        {fileInfoTarget.mime_type?.trim()
+                          ? fileInfoTarget.mime_type
+                          : isVideoFileName(fileInfoTarget.file_name)
+                            ? 'Video'
+                            : 'Image'}
+                      </dd>
                     </div>
                     <div>
                       <dt>Size</dt>
