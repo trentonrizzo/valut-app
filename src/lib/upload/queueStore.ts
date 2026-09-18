@@ -15,6 +15,7 @@ export type PersistedPart = {
   etag: string | null
   bytes: number
   done: boolean
+  acked?: boolean
 }
 
 export type PersistedUploadJob = {
@@ -41,9 +42,13 @@ export type PersistedUploadJob = {
   capturedAt: string | null
   createdAt: number
   r2Complete?: boolean
+  r2Verified?: boolean
+  verifiedSize?: number | null
   multipartComplete?: boolean
   dbComplete?: boolean
+  albumComplete?: boolean
   errorCode?: string | null
+  lastStage?: string | null
   lastModified?: number
 }
 

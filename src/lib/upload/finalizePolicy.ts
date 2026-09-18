@@ -1,23 +1,30 @@
-import type { UploadStage } from './strategy'
+import { canCatalogReady, type UploadStage } from './strategy'
 
-export type RetryScope = 'bytes' | 'complete' | 'catalog' | 'needs-file' | 'done'
+export type RetryScope = 'bytes' | 'complete' | 'verify' | 'catalog' | 'album' | 'needs-file' | 'done'
 
 export type RetryJob = {
   state?: UploadStage
   r2Complete?: boolean
+  r2Verified?: boolean
   multipartComplete?: boolean
   dbComplete?: boolean
+  albumComplete?: boolean
+  verifiedSize?: number | null
+  size?: number
   uploadId?: string | null
   parts?: { done: boolean; etag?: string | null }[]
 }
 
 export function nextRetryScope(job: RetryJob, hasFile: boolean): RetryScope {
   if (job.dbComplete || job.state === 'complete') return 'done'
-  if (job.r2Complete || job.multipartComplete) return 'catalog'
+  if (job.r2Verified && job.verifiedSize === job.size && !job.dbComplete) {
+    return job.albumComplete === false ? 'album' : 'catalog'
+  }
+  if (job.r2Complete || job.multipartComplete) return 'verify'
   const parts = job.parts ?? []
   const allPartsDone = parts.length > 0 && parts.every((p) => p.done && p.etag)
   if (allPartsDone && job.uploadId) return 'complete'
-  if (allPartsDone && !job.uploadId) return 'catalog'
+  if (allPartsDone && !job.uploadId) return 'verify'
   if (!hasFile) return 'needs-file'
   return 'bytes'
 }
@@ -30,7 +37,7 @@ export function reconcilePersistedJob(
     return { state: 'complete', error: null, autoRetry: false }
   }
   const scope = nextRetryScope(job, hasFile)
-  if (scope === 'catalog' || scope === 'complete') {
+  if (scope === 'catalog' || scope === 'complete' || scope === 'verify' || scope === 'album') {
     return { state: 'queued', error: null, autoRetry: true }
   }
   if (scope === 'needs-file') {
@@ -57,4 +64,21 @@ export function missingPartNumbers(parts: { partNumber: number; done: boolean }[
 
 export function progressIsComplete(state: UploadStage): boolean {
   return state === 'complete'
+}
+
+export function shouldExposeInLibrary(row: { upload_status?: string | null }): boolean {
+  return row.upload_status == null || row.upload_status === 'ready'
+}
+
+export function shouldSkipByteUpload(job: RetryJob): boolean {
+  const scope = nextRetryScope(job, true)
+  return scope === 'complete' || scope === 'verify' || scope === 'catalog' || scope === 'album' || scope === 'done'
+}
+
+export function catalogReadyAllowed(job: { r2Verified?: boolean; verifiedSize?: number | null; size: number }): boolean {
+  return canCatalogReady(job)
+}
+
+export function duplicateSafeUpsert() {
+  return { fileOnConflict: 'id', albumOnConflict: 'album_id,file_id' } as const
 }

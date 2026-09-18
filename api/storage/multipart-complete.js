@@ -3,33 +3,25 @@ import { requireAuthenticatedUser } from '../_auth.js'
 import { readJsonBody, sendJson } from '../_json.js'
 import { getBucket, getR2Client } from './_s3.js'
 import { assertOwnKey } from './_keys.js'
+import { normalizePartList } from './_etag.js'
 
-function normalizeParts(parts) {
-  if (!Array.isArray(parts)) return null
-  const out = []
-  for (const p of parts) {
-    const n = Number(p?.PartNumber ?? p?.partNumber)
-    let etag = p?.ETag ?? p?.etag
-    if (!Number.isInteger(n) || n < 1 || typeof etag !== 'string' || !etag.trim()) return null
-    etag = etag.trim()
-    if (etag.startsWith('W/')) etag = etag.slice(2).trim()
-    if (!etag.startsWith('"') && !etag.endsWith('"')) etag = `"${etag.replaceAll('"', '')}"`
-    out.push({ PartNumber: n, ETag: etag })
+async function headObject(key) {
+  try {
+    const out = await getR2Client().send(new HeadObjectCommand({ Bucket: getBucket(), Key: key }))
+    return {
+      exists: true,
+      contentLength: Number(out.ContentLength ?? 0),
+      etag: out.ETag || null,
+      contentType: out.ContentType || null,
+    }
+  } catch {
+    return { exists: false, contentLength: 0, etag: null, contentType: null }
   }
-  out.sort((a, b) => a.PartNumber - b.PartNumber)
-  for (let i = 0; i < out.length; i++) {
-    if (out[i].PartNumber !== i + 1) return null
-  }
-  return out
 }
 
-async function objectExists(key) {
-  try {
-    await getR2Client().send(new HeadObjectCommand({ Bucket: getBucket(), Key: key }))
-    return true
-  } catch {
-    return false
-  }
+function sizeMatches(head, expectedSize) {
+  if (expectedSize == null || !Number.isFinite(expectedSize)) return head.exists
+  return head.exists && head.contentLength === expectedSize
 }
 
 export default async function handler(req, res) {
@@ -42,10 +34,15 @@ export default async function handler(req, res) {
     const body = await readJsonBody(req)
     const key = typeof body.key === 'string' ? body.key.trim() : ''
     const uploadId = typeof body.uploadId === 'string' ? body.uploadId.trim() : ''
-    const parts = normalizeParts(body.parts)
+    const parts = normalizePartList(body.parts)
+    const expectedSize = body.expectedSize == null ? null : Number(body.expectedSize)
 
     if (!key || !uploadId || !parts || parts.length === 0) {
-      return sendJson(res, 400, { ok: false, error: 'key, uploadId, and contiguous parts[] are required' })
+      return sendJson(res, 400, {
+        ok: false,
+        code: 'ERR_MULTIPART_COMPLETE',
+        error: 'key, uploadId, and contiguous parts[] with real ETags are required',
+      })
     }
     if (body.userId && body.userId !== user.id) {
       return sendJson(res, 403, { ok: false, error: 'User mismatch' })
@@ -58,25 +55,50 @@ export default async function handler(req, res) {
           Bucket: getBucket(),
           Key: key,
           UploadId: uploadId,
-          MultipartUpload: { Parts: parts },
+          MultipartUpload: { Parts: parts.map((p) => ({ PartNumber: p.PartNumber, ETag: p.ETag })) },
         }),
       )
     } catch (error) {
-      const already = await objectExists(key)
-      if (already) {
-        return sendJson(res, 200, { ok: true, key, alreadyComplete: true })
+      const head = await headObject(key)
+      if (sizeMatches(head, expectedSize)) {
+        return sendJson(res, 200, {
+          ok: true,
+          key,
+          alreadyComplete: true,
+          verified: true,
+          contentLength: head.contentLength,
+        })
       }
       throw error
     }
 
-    return sendJson(res, 200, { ok: true, key })
+    const head = await headObject(key)
+    if (!sizeMatches(head, expectedSize)) {
+      return sendJson(res, 409, {
+        ok: false,
+        code: 'ERR_R2_SIZE',
+        error: head.exists
+          ? `Assembled object size ${head.contentLength} does not match expected ${expectedSize}`
+          : 'Multipart complete did not produce an R2 object',
+        key,
+        contentLength: head.contentLength,
+        expectedSize,
+      })
+    }
+
+    return sendJson(res, 200, {
+      ok: true,
+      key,
+      verified: true,
+      contentLength: head.contentLength,
+    })
   } catch (error) {
     const status = error?.statusCode || 400
     console.error('MULTIPART COMPLETE ERROR:', error)
     return sendJson(res, status, {
       ok: false,
-      error: error instanceof Error ? error.message : 'Failed to complete multipart upload',
       code: 'ERR_MULTIPART_COMPLETE',
+      error: error instanceof Error ? error.message : 'Failed to complete multipart upload',
     })
   }
 }

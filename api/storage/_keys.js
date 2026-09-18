@@ -13,6 +13,10 @@ export function extractKeyFromStoredUrl(stored) {
   if (!stored || typeof stored !== 'string') return null
   const s = stored.trim()
   if (!s || s.startsWith('blob:')) return null
+  if (s.startsWith('r2://')) {
+    const key = s.slice(5).replace(/^\/+/, '')
+    return key || null
+  }
   if (!/^https?:\/\//i.test(s)) {
     const key = s.replace(/^\/+/, '')
     return key || null

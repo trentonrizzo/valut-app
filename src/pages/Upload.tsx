@@ -8,10 +8,14 @@ import {
   attachFileForResume,
   batchTotals,
   cancelJob,
+  cancelQueued,
+  dismissCompleted,
   dismissFailed,
   enqueueFiles,
   getLiveUploads,
+  pauseAll,
   pauseJob,
+  resumeAll,
   resumeJob,
   retryAllFailed,
   retryJob,
@@ -123,6 +127,10 @@ export function Upload() {
         onCancel={(id) => void cancelJob(id)}
         onReselect={attachFileForResume}
         onDismiss={dismissFailed}
+        onPauseAll={pauseAll}
+        onResumeAll={resumeAll}
+        onCancelQueued={cancelQueued}
+        onDismissCompleted={dismissCompleted}
       />
     </div>
   )

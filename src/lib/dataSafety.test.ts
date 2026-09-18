@@ -48,9 +48,10 @@ describe('data-safety source contracts', () => {
     expect(src).toMatch(/files count decreased/)
   })
 
-  it('album gallery query does not require upload_status', () => {
+  it('album gallery hides non-ready uploads without dropping legacy rows', () => {
     const src = readFileSync(join(root, 'src/pages/Dashboard.tsx'), 'utf8')
-    expect(src).not.toMatch(/eq\('upload_status'/)
+    expect(src).toContain("upload_status.eq.ready,upload_status.is.null")
+    expect(src).not.toMatch(/eq\('upload_status',\s*'failed'/)
   })
 
   it('app renders a boot screen instead of throwing on missing supabase env', () => {

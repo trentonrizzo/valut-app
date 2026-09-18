@@ -1,3 +1,5 @@
+import { classifyUploadError } from './strategy'
+
 export type AuthFetch = (input: string, init?: RequestInit) => Promise<Response>
 
 export function createAuthFetch(accessToken: string): AuthFetch {
@@ -12,75 +14,94 @@ export function createAuthFetch(accessToken: string): AuthFetch {
     })
 }
 
-async function parse<T>(res: Response): Promise<T> {
-  const data = (await res.json().catch(() => ({}))) as T & { ok?: boolean; error?: string }
+async function parse<T>(res: Response, stage: string): Promise<T> {
+  const data = (await res.json().catch(() => ({}))) as T & { ok?: boolean; error?: string; code?: string }
   if (!res.ok || (data as { ok?: boolean }).ok === false) {
-    throw new Error((data as { error?: string }).error || `Request failed (${res.status})`)
+    const code = (data as { code?: string }).code
+    const msg = (data as { error?: string }).error || `Request failed (${res.status})`
+    throw classifyUploadError(new Error(code ? `${code}: ${msg}` : msg), stage)
   }
   return data
+}
+
+async function call<T>(stage: string, fn: () => Promise<Response>): Promise<T> {
+  try {
+    const res = await fn()
+    return await parse<T>(res, stage)
+  } catch (e) {
+    throw classifyUploadError(e, stage)
+  }
 }
 
 export async function apiPutUrl(
   authFetch: AuthFetch,
   args: { objectId: string; contentType: string; key?: string },
 ) {
-  const res = await authFetch('/api/storage/put-url', {
-    method: 'POST',
-    body: JSON.stringify(args),
-  })
-  return parse<{ ok: true; key: string; uploadUrl: string; expiresIn: number }>(res)
+  return call<{ ok: true; key: string; uploadUrl: string; expiresIn: number }>('put-url', () =>
+    authFetch('/api/storage/put-url', { method: 'POST', body: JSON.stringify(args) }),
+  )
 }
 
 export async function apiMultipartInit(
   authFetch: AuthFetch,
   args: { objectId: string; contentType: string; key?: string },
 ) {
-  const res = await authFetch('/api/storage/multipart-init', {
-    method: 'POST',
-    body: JSON.stringify(args),
-  })
-  return parse<{ ok: true; key: string; uploadId: string }>(res)
+  return call<{ ok: true; key: string; uploadId: string }>('multipart-init', () =>
+    authFetch('/api/storage/multipart-init', { method: 'POST', body: JSON.stringify(args) }),
+  )
 }
 
 export async function apiMultipartPartUrl(
   authFetch: AuthFetch,
   args: { key: string; uploadId: string; partNumber: number },
 ) {
-  const res = await authFetch('/api/storage/multipart-part-url', {
-    method: 'POST',
-    body: JSON.stringify(args),
-  })
-  return parse<{ ok: true; url: string; expiresIn: number; partNumber: number }>(res)
+  return call<{ ok: true; url: string; expiresIn: number; partNumber: number }>('part-sign', () =>
+    authFetch('/api/storage/multipart-part-url', { method: 'POST', body: JSON.stringify(args) }),
+  )
+}
+
+export async function apiMultipartListParts(
+  authFetch: AuthFetch,
+  args: { key: string; uploadId: string },
+) {
+  return call<{ ok: true; parts: { PartNumber: number; ETag: string; Size: number }[] }>('part-list', () =>
+    authFetch('/api/storage/multipart-list-parts', { method: 'POST', body: JSON.stringify(args) }),
+  )
 }
 
 export async function apiMultipartComplete(
   authFetch: AuthFetch,
-  args: { key: string; uploadId: string; parts: { PartNumber: number; ETag: string }[] },
+  args: { key: string; uploadId: string; parts: { PartNumber: number; ETag: string }[]; expectedSize: number },
 ) {
-  const res = await authFetch('/api/storage/multipart-complete', {
-    method: 'POST',
-    body: JSON.stringify(args),
-  })
-  return parse<{ ok: true; key: string }>(res)
+  return call<{ ok: true; key: string; verified?: boolean; contentLength?: number; alreadyComplete?: boolean }>(
+    'multipart-complete',
+    () => authFetch('/api/storage/multipart-complete', { method: 'POST', body: JSON.stringify(args) }),
+  )
+}
+
+export async function apiVerifyObject(
+  authFetch: AuthFetch,
+  args: { key: string; expectedSize: number },
+) {
+  return call<{ ok: true; verified: true; key: string; contentLength: number; contentType: string | null; etag: string | null }>(
+    'r2-verify',
+    () => authFetch('/api/storage/verify-object', { method: 'POST', body: JSON.stringify(args) }),
+  )
 }
 
 export async function apiMultipartAbort(authFetch: AuthFetch, args: { key: string; uploadId: string }) {
-  const res = await authFetch('/api/storage/multipart-abort', {
-    method: 'POST',
-    body: JSON.stringify(args),
-  })
-  return parse<{ ok: true }>(res)
+  return call<{ ok: true }>('multipart-abort', () =>
+    authFetch('/api/storage/multipart-abort', { method: 'POST', body: JSON.stringify(args) }),
+  )
 }
 
 export async function apiRecordOrphan(
   authFetch: AuthFetch,
   args: { storageKey: string; originalName: string; fileSizeBytes: number; uploadId?: string; error: string },
 ) {
-  const res = await authFetch('/api/storage/record-orphan', {
-    method: 'POST',
-    body: JSON.stringify(args),
-  })
-  return parse<{ ok: true }>(res)
+  return call<{ ok: true }>('record-orphan', () =>
+    authFetch('/api/storage/record-orphan', { method: 'POST', body: JSON.stringify(args) }),
+  )
 }
 
 export async function apiSignedGet(accessToken: string, fileId: string, variant: 'original' | 'thumb' | 'poster' = 'original') {
@@ -97,5 +118,5 @@ export async function apiSignedGet(accessToken: string, fileId: string, variant:
     metadata?: Record<string, unknown> | null
     mimeType?: string | null
     fileName?: string | null
-  }>(res)
+  }>(res, 'signed-get')
 }

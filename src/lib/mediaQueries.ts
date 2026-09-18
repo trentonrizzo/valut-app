@@ -110,7 +110,7 @@ export async function listMediaPage(opts: {
   let q = supabase.from('files').select('*').eq('user_id', opts.userId)
 
   q = q.or('purpose.eq.content,purpose.is.null')
-  if (v11) q = q.neq('upload_status', 'failed')
+  if (v11) q = q.eq('upload_status', 'ready')
   if (!v11 && f.albumId) q = q.eq('album_id', f.albumId)
 
   if (f.type === 'videos') {

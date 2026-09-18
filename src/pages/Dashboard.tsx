@@ -101,6 +101,8 @@ export function Dashboard() {
   }
 
   function isGalleryFile(f: FileRow): boolean {
+    const status = (f as FileRow & { upload_status?: string | null }).upload_status
+    if (status && status !== 'ready') return false
     return f.purpose !== 'cover'
   }
 
@@ -296,6 +298,7 @@ export function Dashboard() {
           .select('*')
           .eq('album_id', openAlbumId)
           .eq('user_id', user.id)
+          .or('upload_status.eq.ready,upload_status.is.null')
           .order('created_at', { ascending: false })
 
         if (selectError) throw new Error(selectError.message)
@@ -514,6 +517,7 @@ export function Dashboard() {
           .select('*')
           .eq('album_id', openAlbumId)
           .eq('user_id', user.id)
+          .or('upload_status.eq.ready,upload_status.is.null')
           .order('created_at', { ascending: false })
           .limit(48)
 
@@ -988,6 +992,7 @@ export function Dashboard() {
                         .select('*')
                         .eq('album_id', openAlbumId)
                         .eq('user_id', user.id)
+                        .or('upload_status.eq.ready,upload_status.is.null')
                         .order('created_at', { ascending: false })
                         .range(files.length, files.length + 47)
                       if (error) throw new Error(error.message)

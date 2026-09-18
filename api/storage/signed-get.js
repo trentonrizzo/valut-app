@@ -52,9 +52,14 @@ export default async function handler(req, res) {
       return sendJson(res, 404, { ok: false, error: 'No storage object for this file' })
     }
 
+    const mime =
+      typeof row.mime_type === 'string' && row.mime_type.trim() && row.mime_type !== 'application/octet-stream'
+        ? row.mime_type.trim()
+        : null
     const command = new GetObjectCommand({
       Bucket: getBucket(),
       Key: key,
+      ...(mime ? { ResponseContentType: mime, ResponseContentDisposition: 'inline' } : {}),
     })
     const signedUrl = await getSignedUrl(getR2Client(), command, { expiresIn: GET_EXPIRES })
 

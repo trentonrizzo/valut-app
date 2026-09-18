@@ -4,6 +4,7 @@ import { requireAuthenticatedUser } from '../_auth.js'
 import { readJsonBody, sendJson } from '../_json.js'
 import { getBucket, getR2Client } from './_s3.js'
 import { assertOwnKey, originalKey } from './_keys.js'
+import { ensureBrowserUploadCors } from './_cors.js'
 
 const PUT_EXPIRES = 60 * 60
 
@@ -31,6 +32,7 @@ export default async function handler(req, res) {
 
     const key = requestedKey || originalKey(user.id, objectId)
     assertOwnKey(user.id, key)
+    void ensureBrowserUploadCors()
 
     const command = new PutObjectCommand({
       Bucket: getBucket(),

@@ -4,6 +4,9 @@ export const MULTIPART_THRESHOLD_BYTES = 8 * 1024 * 1024
 export const DEFAULT_PART_BYTES = 8 * 1024 * 1024
 export const MIN_S3_PART_BYTES = 5 * 1024 * 1024
 export const MAX_PARTS = 10_000
+export const MAX_PART_BYTES = 5 * 1024 * 1024 * 1024
+export const MAX_OBJECT_BYTES = 5 * 1024 * 1024 * 1024 * 1024
+export const MAX_QUEUE_ITEMS = Number.POSITIVE_INFINITY
 
 export type UploadStage =
   | 'queued'
@@ -28,8 +31,17 @@ export type UploadPlan = {
   parts: PlannedPart[]
 }
 
+export function providerLimitError(fileSize: number): string | null {
+  if (fileSize > MAX_OBJECT_BYTES) {
+    return `File is larger than the R2 object limit (${MAX_OBJECT_BYTES} bytes).`
+  }
+  return null
+}
+
 export function planUpload(fileSize: number, threshold = MULTIPART_THRESHOLD_BYTES): UploadPlan {
   const size = Math.max(0, Math.floor(fileSize))
+  const limit = providerLimitError(size)
+  if (limit) throw codedError('ERR_PROVIDER_LIMIT', limit)
   if (size <= threshold) {
     return {
       useMultipart: false,
@@ -42,6 +54,9 @@ export function planUpload(fileSize: number, threshold = MULTIPART_THRESHOLD_BYT
   let count = Math.ceil(size / partSize)
   while (count > MAX_PARTS) {
     partSize *= 2
+    if (partSize > MAX_PART_BYTES) {
+      throw codedError('ERR_PROVIDER_LIMIT', 'File requires more than 10,000 R2 parts even at the maximum part size.')
+    }
     count = Math.ceil(size / partSize)
   }
 
@@ -119,12 +134,32 @@ export function fileMatchesResume(
 
 export function canFinalizeWithoutFile(job: {
   r2Complete?: boolean
+  r2Verified?: boolean
   multipartComplete?: boolean
-  parts?: { done: boolean }[]
+  parts?: { done: boolean; etag?: string | null }[]
 }): boolean {
-  if (job.r2Complete || job.multipartComplete) return true
+  if (job.r2Verified || job.r2Complete || job.multipartComplete) return true
   const parts = job.parts ?? []
-  return parts.length > 0 && parts.every((p) => p.done)
+  return parts.length > 0 && parts.every((p) => p.done && Boolean(p.etag))
+}
+
+export function canCatalogReady(job: {
+  r2Verified?: boolean
+  verifiedSize?: number | null
+  size: number
+}): boolean {
+  return Boolean(job.r2Verified && job.verifiedSize === job.size)
+}
+
+export function classifyUploadError(e: unknown, stage: string): UploadCodedError {
+  if (e instanceof UploadCodedError) return e
+  const msg = e instanceof Error ? e.message : String(e)
+  if (/paused|cancelled/i.test(msg)) return codedError('ERR_PAUSED', msg)
+  if (/load failed|failed to fetch|networkerror|network request failed/i.test(msg)) {
+    return codedError('ERR_NETWORK', `${stage}: browser network request failed`)
+  }
+  if (/etag/i.test(msg)) return codedError('ERR_ETAG', `${stage}: ${msg}`)
+  return codedError('ERR_UPLOAD', `${stage}: ${msg}`)
 }
 
 export function displayProgress(job: {

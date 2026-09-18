@@ -16,9 +16,12 @@ type FileRow = {
   file_size_bytes?: number | null
   purpose?: string | null
   is_encrypted?: boolean | null
+  mime_type?: string | null
+  upload_status?: string | null
 }
 
 function isGalleryFile(f: FileRow): boolean {
+  if (f.upload_status && f.upload_status !== 'ready') return false
   return f.purpose !== 'cover'
 }
 
@@ -73,6 +76,12 @@ function SlideVideo({
     file.id,
   )
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const [playFailed, setPlayFailed] = useState(false)
+  const mime = file.mime_type && file.mime_type.startsWith('video/') ? file.mime_type : undefined
+
+  useEffect(() => {
+    setPlayFailed(false)
+  }, [displayUrl])
 
   useEffect(() => {
     const el = videoRef.current
@@ -99,18 +108,27 @@ function SlideVideo({
   if (failed || !displayUrl) {
     return <div className="fs-media-viewer__failed" aria-label="Could not load video" />
   }
+  if (playFailed) {
+    return (
+      <div className="fs-media-viewer__failed" role="status">
+        This device cannot play this video format. The original is still stored.
+      </div>
+    )
+  }
 
   return (
     <div className="fs-media-viewer__video-shell">
       <video
         ref={videoRef}
         className="fs-media-viewer__video"
-        src={displayUrl}
         controls
         playsInline
         preload="metadata"
         loop={loop}
-      />
+        onError={() => setPlayFailed(true)}
+      >
+        <source src={displayUrl} type={mime || 'video/mp4'} />
+      </video>
     </div>
   )
 }

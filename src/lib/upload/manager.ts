@@ -17,25 +17,29 @@ import {
   apiMultipartInit,
   apiMultipartPartUrl,
   apiMultipartComplete,
+  apiMultipartListParts,
   apiMultipartAbort,
   apiRecordOrphan,
+  apiVerifyObject,
 } from './storageApi'
 import { deleteJob, listJobs, saveJob, type PersistedUploadJob, type UploadUiState } from './queueStore'
 import { fileConcurrency, partConcurrency, putWithRetry } from './multipartConfig'
 import { extractMediaMetadata, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
 import {
+  canCatalogReady,
   canFinalizeWithoutFile,
+  classifyUploadError,
   codedError,
   displayProgress,
-  errorCodeOf,
   fileMatchesResume,
   isImageUpload,
   isVideoUpload,
   normalizeUploadMime,
   planUpload,
+  providerLimitError,
   uniqueOriginalKey,
 } from './strategy'
-import { reconcilePersistedJob } from './finalizePolicy'
+import { reconcilePersistedJob, shouldSkipByteUpload } from './finalizePolicy'
 
 export type LiveUploadItem = PersistedUploadJob & {
   speedBps: number
@@ -140,7 +144,10 @@ export async function enqueueFiles(files: File[], opts: { albumId: string | null
   if (!userId || !accessToken) throw new Error('Not signed in')
   const purpose = opts.purpose ?? 'content'
   const ids: string[] = []
+  let n = 0
   for (const file of files) {
+    const limit = providerLimitError(file.size)
+    if (limit) throw codedError('ERR_PROVIDER_LIMIT', `${file.name}: ${limit}`)
     const id = crypto.randomUUID()
     ids.push(id)
     const objectId = id
@@ -170,13 +177,19 @@ export async function enqueueFiles(files: File[], opts: { albumId: string | null
       capturedAt: null,
       createdAt: Date.now(),
       r2Complete: false,
+      r2Verified: false,
+      verifiedSize: null,
       multipartComplete: false,
       dbComplete: false,
+      albumComplete: false,
       errorCode: null,
+      lastStage: 'queued',
       lastModified: file.lastModified,
     }
     filesInMemory.set(id, file)
     await persist(job)
+    n += 1
+    if (n % 8 === 0) await new Promise<void>((r) => setTimeout(r, 0))
   }
   void pump()
   return ids
@@ -279,6 +292,26 @@ export function dismissFailed() {
   emit()
 }
 
+export function pauseAll() {
+  for (const job of live.values()) {
+    if (['queued', 'preparing', 'encrypting', 'uploading', 'finalizing', 'retrying'].includes(job.state)) {
+      pauseJob(job.id)
+    }
+  }
+}
+
+export function resumeAll() {
+  for (const job of live.values()) {
+    if (job.state === 'paused') resumeJob(job.id)
+  }
+}
+
+export function cancelQueued() {
+  for (const job of [...live.values()]) {
+    if (job.state === 'queued' || job.state === 'paused') void cancelJob(job.id)
+  }
+}
+
 async function pump() {
   if (pumping) return
   pumping = true
@@ -341,7 +374,8 @@ async function runJob(id: string) {
 
     let dek: CryptoKey | null = null
     let fileNonce: Uint8Array | null = null
-    if (!job.r2Complete && !finalizeOnly) {
+    const skipBytes = shouldSkipByteUpload(job) || job.r2Verified || finalizeOnly
+    if (!skipBytes) {
       if (masterKey && job.encryptionVersion === ENCRYPTION_VERSION) {
         job = { ...job, state: 'encrypting' }
         await persist(job)
@@ -385,10 +419,10 @@ async function runJob(id: string) {
             },
             { requireEtag: false, signal: ac.signal },
           )
-          job.parts = [{ partNumber: 1, etag: 'put', bytes: file.size, done: true }]
+          job.parts = [{ partNumber: 1, etag: 'put', bytes: file.size, done: true, acked: true }]
           job.uploadedBytes = file.size
         }
-        job = { ...job, r2Complete: true, uploadedBytes: job.size }
+        job = { ...job, lastStage: 'simple-put', uploadedBytes: job.size }
         await persist(job)
       } else {
         if (!job.uploadId) {
@@ -406,36 +440,15 @@ async function runJob(id: string) {
       }
     }
 
-    job = { ...job, state: 'finalizing', uploadedBytes: job.size }
+    job = { ...job, state: 'finalizing', uploadedBytes: job.size, lastStage: 'r2_completing' }
     await persist(job)
-
-    if (!job.r2Complete && job.uploadId && job.storageKey) {
-      const parts = job.parts
-        .filter((p) => p.done && p.etag)
-        .map((p) => ({ PartNumber: p.partNumber, ETag: p.etag as string }))
-      if (parts.length !== job.parts.length) {
-        throw codedError('ERR_MULTIPART_PARTS', 'Not all multipart parts finished. Retry to continue missing parts.')
-      }
-      await apiMultipartComplete(authFetch, { key: job.storageKey, uploadId: job.uploadId, parts })
-      job = { ...job, r2Complete: true, multipartComplete: true }
-      await persist(job)
-    } else if (job.uploadId && job.storageKey && !job.multipartComplete) {
-      try {
-        const parts = job.parts
-          .filter((p) => p.done && p.etag)
-          .map((p) => ({ PartNumber: p.partNumber, ETag: p.etag as string }))
-        if (parts.length === job.parts.length && parts.length > 0) {
-          await apiMultipartComplete(authFetch, { key: job.storageKey, uploadId: job.uploadId, parts })
-        }
-      } catch {
-        /* object may already exist */
-      }
-      job = { ...job, r2Complete: true, multipartComplete: true }
-      await persist(job)
-    } else {
-      job = { ...job, r2Complete: true }
-      await persist(job)
+    job = await assembleAndVerify(job, authFetch)
+    if (!canCatalogReady(job)) {
+      throw codedError('ERR_R2_VERIFY', 'R2 object was not verified; not adding to Library.')
     }
+
+    job = { ...job, lastStage: 'cataloging' }
+    await persist(job)
 
     let thumbnailKey: string | null = null
     let posterKeyVal: string | null = null
@@ -462,8 +475,9 @@ async function runJob(id: string) {
     live.set(id, toLive(job))
     emit()
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Upload failed'
-    const code = errorCodeOf(e)
+    const classified = classifyUploadError(e, live.get(id)?.lastStage || 'upload')
+    const msg = classified.message
+    const code = classified.code
     if (paused.has(id) || code === 'ERR_PAUSED' || /paused|cancelled/i.test(msg)) {
       const cur = live.get(id)
       if (cur) await persist({ ...cur, state: 'paused' })
@@ -475,6 +489,7 @@ async function runJob(id: string) {
         ...cur,
         state: 'failed',
         errorCode: code,
+        lastStage: cur.lastStage ?? classified.code,
         error: `${code}: ${msg}`,
       })
     }
@@ -500,7 +515,7 @@ async function finalizeCatalog(
     mime_type: job.type,
     storage_key: job.storageKey,
     storage_provider: 'r2',
-    upload_status: 'ready',
+    upload_status: 'ready' as const,
     width: job.width,
     height: job.height,
     duration_ms: job.durationMs,
@@ -540,7 +555,92 @@ async function finalizeCatalog(
     if (albumErr && !/duplicate|conflict|already/i.test(albumErr.message)) {
       throw codedError('ERR_ALBUM_ASSOCIATION', `Original stored, album link failed: ${albumErr.message}`)
     }
+    job.albumComplete = true
+  } else {
+    job.albumComplete = true
   }
+}
+
+async function assembleAndVerify(
+  initial: PersistedUploadJob,
+  authFetch: ReturnType<typeof createAuthFetch>,
+): Promise<PersistedUploadJob> {
+  let job = initial
+  if (job.r2Verified && job.verifiedSize === job.size) return job
+
+  if (job.uploadId && job.storageKey && !job.multipartComplete) {
+    try {
+      job = { ...job, lastStage: 'part-list' }
+      await persist(job)
+      const listed = await apiMultipartListParts(authFetch, { key: job.storageKey, uploadId: job.uploadId })
+      if (!listed.parts.length) {
+        throw codedError('ERR_MULTIPART_PARTS', 'R2 has no uploaded parts for this multipart session.')
+      }
+      if (listed.parts.length !== job.parts.length) {
+        throw codedError(
+          'ERR_MULTIPART_PARTS',
+          `R2 listed ${listed.parts.length} parts; expected ${job.parts.length}. Retry missing parts.`,
+        )
+      }
+      const parts = job.parts.map((p) => {
+        const server = listed.parts.find((s) => s.PartNumber === p.partNumber)
+        if (!server?.ETag) throw codedError('ERR_ETAG', `Missing ETag for part ${p.partNumber}`)
+        return { ...p, etag: server.ETag, done: true, acked: true }
+      })
+      job = { ...job, parts, lastStage: 'multipart-complete' }
+      await persist(job)
+      const complete = await apiMultipartComplete(authFetch, {
+        key: job.storageKey,
+        uploadId: job.uploadId,
+        expectedSize: job.size,
+        parts: parts.map((p) => ({ PartNumber: p.partNumber, ETag: p.etag as string })),
+      })
+      job = {
+        ...job,
+        multipartComplete: true,
+        r2Complete: true,
+        lastStage: 'r2_verifying',
+        verifiedSize: complete.contentLength ?? null,
+      }
+      await persist(job)
+    } catch (e) {
+      try {
+        const recovered = await apiVerifyObject(authFetch, { key: job.storageKey, expectedSize: job.size })
+        if (recovered.verified && recovered.contentLength === job.size) {
+          job = {
+            ...job,
+            multipartComplete: true,
+            r2Complete: true,
+            r2Verified: true,
+            verifiedSize: recovered.contentLength,
+            lastStage: 'r2_verified',
+          }
+          await persist(job)
+          return job
+        }
+      } catch {
+        /* still fail with original complete/list error */
+      }
+      throw e
+    }
+  }
+
+  if (!job.storageKey) throw codedError('ERR_R2_VERIFY', 'Missing storage key')
+  job = { ...job, lastStage: 'r2_verifying' }
+  await persist(job)
+  const verified = await apiVerifyObject(authFetch, { key: job.storageKey, expectedSize: job.size })
+  if (!verified.verified || verified.contentLength !== job.size) {
+    throw codedError('ERR_R2_SIZE', `R2 size ${verified.contentLength} != ${job.size}`)
+  }
+  job = {
+    ...job,
+    r2Complete: true,
+    r2Verified: true,
+    verifiedSize: verified.contentLength,
+    lastStage: 'r2_verified',
+  }
+  await persist(job)
+  return job
 }
 
 async function buildChunkBlob(
@@ -569,7 +669,7 @@ async function uploadParts(
   signal: AbortSignal,
 ) {
   const id = initial.id
-  const pending = () => (live.get(id)?.parts ?? []).filter((p) => !p.done).map((p) => p.partNumber)
+  const pending = () => (live.get(id)?.parts ?? []).filter((p) => !p.done && !p.acked).map((p) => p.partNumber)
   const limit = partConcurrency()
   const chunkSize = initial.chunkSize || CHUNK_PLAINTEXT_BYTES
 
@@ -591,15 +691,17 @@ async function uploadParts(
       const doneBytes = latest.parts.filter((p) => p.done).reduce((s, p) => s + p.bytes, 0)
       noteProgress(latest, doneBytes + loaded)
     }, {
-      requireEtag: true,
+      requireEtag: false,
       signal,
       refreshUrl: sign,
     })
     const latest = live.get(id)!
     const parts = latest.parts.map((part) =>
-      part.partNumber === partNumber ? { ...part, etag: etag || part.etag, done: true } : part,
+      part.partNumber === partNumber
+        ? { ...part, etag: etag || part.etag, done: Boolean(etag || part.etag), acked: true }
+        : part,
     )
-    const uploadedBytes = parts.filter((part) => part.done).reduce((s, part) => s + part.bytes, 0)
+    const uploadedBytes = parts.filter((part) => part.done || part.acked).reduce((s, part) => s + part.bytes, 0)
     const next = { ...latest, parts, uploadedBytes, state: 'uploading' as UploadUiState }
     noteProgress(next, uploadedBytes)
     await persist(next)

@@ -3,6 +3,7 @@ import { requireAuthenticatedUser } from '../_auth.js'
 import { readJsonBody, sendJson } from '../_json.js'
 import { getBucket, getR2Client } from './_s3.js'
 import { assertOwnKey, originalKey } from './_keys.js'
+import { ensureBrowserUploadCors } from './_cors.js'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -28,6 +29,7 @@ export default async function handler(req, res) {
 
     const key = requestedKey || originalKey(user.id, objectId)
     assertOwnKey(user.id, key)
+    void ensureBrowserUploadCors()
 
     const out = await getR2Client().send(
       new CreateMultipartUploadCommand({

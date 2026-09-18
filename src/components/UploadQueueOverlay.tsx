@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 export type UploadQueueStatus =
   | 'queued'
   | 'preparing'
@@ -42,6 +44,10 @@ type Props = {
   onCancel?: (id: string) => void
   onReselect?: (id: string, file: File) => void
   onDismiss?: () => void
+  onPauseAll?: () => void
+  onResumeAll?: () => void
+  onCancelQueued?: () => void
+  onDismissCompleted?: () => void
 }
 
 function statusLabel(item: UploadQueueItem): string {
@@ -82,12 +88,22 @@ export function UploadQueueOverlay({
   onCancel,
   onReselect,
   onDismiss,
+  onPauseAll,
+  onResumeAll,
+  onCancelQueued,
+  onDismissCompleted,
 }: Props) {
+  const [hideCompleted, setHideCompleted] = useState(true)
   if (!visible) return null
 
   const hasFailed = items.some((i) => i.status === 'failed')
   const failedCount = items.filter((i) => i.status === 'failed').length
   const doneCount = items.filter((i) => i.status === 'done').length
+  const queuedCount = items.filter((i) => i.status === 'queued').length
+  const activeCount = items.filter((i) =>
+    ['preparing', 'uploading', 'finalizing', 'retrying'].includes(i.status),
+  ).length
+  const visibleItems = hideCompleted ? items.filter((i) => i.status !== 'done') : items
   const active = items.some((i) =>
     ['queued', 'preparing', 'uploading', 'finalizing', 'retrying'].includes(i.status),
   )
@@ -116,6 +132,8 @@ export function UploadQueueOverlay({
         <p className="vault-upload-chip__meta">
           <span>
             {doneCount}/{batchTotal || items.length} complete
+            {activeCount ? ` · ${activeCount} active` : ''}
+            {queuedCount ? ` · ${queuedCount} queued` : ''}
             {failedCount ? ` · ${failedCount} failed` : ''}
           </span>
           {active ? (
@@ -143,9 +161,15 @@ export function UploadQueueOverlay({
           <div className="vault-upload-chip__bar-fill" style={{ width: `${overallProgress}%` }} />
         </div>
 
-        {items.length > 0 ? (
+        {doneCount > 0 ? (
+          <button type="button" className="vault-upload-queue__btn btn btn--ghost" onClick={() => setHideCompleted((v) => !v)}>
+            {hideCompleted ? `Show ${doneCount} completed` : 'Hide completed'}
+          </button>
+        ) : null}
+
+        {visibleItems.length > 0 ? (
           <ul className="vault-upload-queue" aria-label="Per-file progress">
-            {items.map((item) => (
+            {visibleItems.map((item) => (
               <li key={item.id} className="vault-upload-queue__row">
                 <div className="vault-upload-queue__head">
                   <span className="vault-upload-queue__name" title={item.name}>
@@ -231,6 +255,26 @@ export function UploadQueueOverlay({
         ) : null}
 
         <div className="vault-upload-queue__footer">
+          {onPauseAll && active ? (
+            <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onPauseAll}>
+              Pause all
+            </button>
+          ) : null}
+          {onResumeAll ? (
+            <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onResumeAll}>
+              Resume all
+            </button>
+          ) : null}
+          {onCancelQueued && queuedCount > 0 ? (
+            <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onCancelQueued}>
+              Cancel queued
+            </button>
+          ) : null}
+          {doneCount > 0 && onDismissCompleted ? (
+            <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onDismissCompleted}>
+              Clear completed
+            </button>
+          ) : null}
           {hasFailed && onRetryAll ? (
             <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onRetryAll}>
               Retry failed
