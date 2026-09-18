@@ -7,7 +7,7 @@ import type { FileRow } from '../types/media'
 import { listMediaPage } from '../lib/mediaQueries'
 import { fetchAlbumsWithCounts } from '../lib/albumQueries'
 import { listTags, addTagsToFiles, removeTagsFromFiles } from '../lib/tags'
-import { addFilesToAlbum, setFavorite } from '../lib/albumMembership'
+import { addFilesToAlbum, setFavorite, setRating } from '../lib/albumMembership'
 import { enqueueFiles, getLiveUploads, subscribeUploads } from '../lib/upload/manager'
 import { apiSignedGet } from '../lib/upload/storageApi'
 import { FilterBar } from '../components/library/FilterBar'
@@ -130,7 +130,7 @@ export function Library() {
             />
           </label>
         </div>
-        <FilterBar filters={filters} onChange={setFilters} tags={tags} />
+        <FilterBar filters={filters} onChange={setFilters} tags={tags} albums={albums} />
         <BulkActionBar
           count={selected.size}
           albums={albums}
@@ -145,6 +145,11 @@ export function Library() {
             if (!user) return
             await setFavorite(user.id, [...selected], on)
             setRows((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, favorite: on } : r)))
+          }}
+          onRate={async (rating) => {
+            if (!user) return
+            await setRating(user.id, [...selected], rating)
+            setRows((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, rating } : r)))
           }}
           onAddTags={() => setTagModal('add')}
           onRemoveTags={() => setTagModal('remove')}

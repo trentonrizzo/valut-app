@@ -8,6 +8,7 @@ type Props = {
   onMoveToAlbum?: (albumId: string) => void
   onRemoveFromAlbum?: () => void
   onFavorite: (on: boolean) => void
+  onRate?: (rating: number | null) => void
   onAddTags: () => void
   onRemoveTags: () => void
   onDownload: () => void
@@ -23,6 +24,7 @@ export function BulkActionBar({
   onMoveToAlbum,
   onRemoveFromAlbum,
   onFavorite,
+  onRate,
   onAddTags,
   onRemoveTags,
   onDownload,
@@ -84,6 +86,27 @@ export function BulkActionBar({
       <button type="button" className="btn btn--ghost" onClick={() => onFavorite(false)}>
         Unfavorite
       </button>
+      {onRate ? (
+        <label className="bulk-bar__select">
+          Rating
+          <select
+            defaultValue=""
+            onChange={(e) => {
+              if (!e.target.value) return
+              onRate(e.target.value === 'none' ? null : Number(e.target.value))
+              e.target.value = ''
+            }}
+          >
+            <option value="">Set…</option>
+            <option value="none">Clear</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+      ) : null}
       <button type="button" className="btn btn--ghost" onClick={onAddTags}>
         Add tags
       </button>

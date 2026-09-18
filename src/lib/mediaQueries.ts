@@ -2,6 +2,11 @@ import { supabase } from './supabase'
 import { isVideoFileName } from './mediaTypes'
 import type { FileRow, MediaFilters, MediaSort, PageCursor } from '../types/media'
 import { PAGE_SIZE } from '../types/media'
+import { isV11SchemaReady } from './schemaGuard'
+
+function sanitizeSearch(raw: string): string {
+  return raw.trim().replace(/[%(),]/g, ' ').replace(/\s+/g, ' ').slice(0, 80)
+}
 
 const RESOLUTION_MIN: Record<NonNullable<MediaFilters['resolution']>, { w: number; h: number }> = {
   '720': { w: 1280, h: 720 },
@@ -54,38 +59,59 @@ export async function listMediaPage(opts: {
 }): Promise<{ rows: FileRow[]; nextCursor: PageCursor | null }> {
   const limit = opts.limit ?? PAGE_SIZE
   const f = opts.filters
+  const v11 = await isV11SchemaReady()
 
   let tagIds: string[] | null = null
-  if (f.tagIds.length > 0 && f.tagMode === 'and') {
+  if (v11 && f.tagIds.length > 0 && f.tagMode === 'and') {
     tagIds = await fetchTagAndFileIds(f.tagIds)
     if (tagIds.length === 0) return { rows: [], nextCursor: null }
   }
 
   let albumFileIds: string[] | null = null
   if (f.albumId) {
-    const { data, error } = await supabase
-      .from('album_files')
-      .select('file_id')
-      .eq('user_id', opts.userId)
-      .eq('album_id', f.albumId)
-    if (error) throw new Error(error.message)
-    albumFileIds = (data ?? []).map((r) => r.file_id)
-    if (albumFileIds.length === 0) return { rows: [], nextCursor: null }
+    if (v11) {
+      const { data, error } = await supabase
+        .from('album_files')
+        .select('file_id')
+        .eq('user_id', opts.userId)
+        .eq('album_id', f.albumId)
+      if (error) throw new Error(error.message)
+      albumFileIds = (data ?? []).map((r) => r.file_id)
+      if (albumFileIds.length === 0) return { rows: [], nextCursor: null }
+    }
   }
 
   let noAlbumIds: string[] | null = null
-  if (f.noAlbum) {
+  if (v11 && f.noAlbum) {
     const { data, error } = await supabase.from('album_files').select('file_id').eq('user_id', opts.userId)
     if (error) throw new Error(error.message)
     noAlbumIds = (data ?? []).map((r) => r.file_id)
   }
 
-  let q = supabase
-    .from('files')
-    .select('*')
-    .eq('user_id', opts.userId)
-    .eq('purpose', 'content')
-    .eq('upload_status', 'ready')
+  let searchIds: string[] | null = null
+  const qSearch = sanitizeSearch(f.search)
+  if (v11 && qSearch) {
+    const { data: tagHits } = await supabase
+      .from('tags')
+      .select('id')
+      .eq('user_id', opts.userId)
+      .ilike('name', `%${qSearch}%`)
+    const hitTagIds = (tagHits ?? []).map((t) => t.id)
+    if (hitTagIds.length > 0) {
+      const { data: tagged } = await supabase
+        .from('file_tags')
+        .select('file_id')
+        .eq('user_id', opts.userId)
+        .in('tag_id', hitTagIds)
+      searchIds = [...new Set((tagged ?? []).map((r) => r.file_id))]
+    }
+  }
+
+  let q = supabase.from('files').select('*').eq('user_id', opts.userId)
+
+  q = q.or('purpose.eq.content,purpose.is.null')
+  if (v11) q = q.neq('upload_status', 'failed')
+  if (!v11 && f.albumId) q = q.eq('album_id', f.albumId)
 
   if (f.type === 'videos') {
     q = q.or('mime_type.ilike.video/%,file_name.ilike.%.mp4,file_name.ilike.%.mov,file_name.ilike.%.webm,file_name.ilike.%.mkv')
@@ -95,7 +121,7 @@ export async function listMediaPage(opts: {
 
   if (tagIds) {
     q = q.in('id', tagIds.slice(0, 500))
-  } else if (f.tagIds.length > 0 && f.tagMode === 'or') {
+  } else if (v11 && f.tagIds.length > 0 && f.tagMode === 'or') {
     const { data, error } = await supabase
       .from('file_tags')
       .select('file_id')
@@ -109,29 +135,39 @@ export async function listMediaPage(opts: {
 
   if (albumFileIds) q = q.in('id', albumFileIds.slice(0, 500))
   if (noAlbumIds && noAlbumIds.length > 0) q = q.not('id', 'in', `(${noAlbumIds.slice(0, 500).join(',')})`)
+  if (!v11 && f.noAlbum) q = q.is('album_id', null)
 
-  if (f.favorite === 'yes') q = q.eq('favorite', true)
-  if (f.favorite === 'no') q = q.eq('favorite', false)
-  if (f.ratingExact != null) q = q.eq('rating', f.ratingExact)
-  if (f.ratingMin != null) q = q.gte('rating', f.ratingMin)
+  if (v11 && f.favorite === 'yes') q = q.eq('favorite', true)
+  if (v11 && f.favorite === 'no') q = q.eq('favorite', false)
+  if (v11 && f.ratingExact != null) q = q.eq('rating', f.ratingExact)
+  if (v11 && f.ratingMin != null) q = q.gte('rating', f.ratingMin)
   if (f.sizeMin != null) q = q.gte('file_size_bytes', f.sizeMin)
   if (f.sizeMax != null) q = q.lte('file_size_bytes', f.sizeMax)
-  if (f.durationMinMs != null) q = q.gte('duration_ms', f.durationMinMs)
-  if (f.durationMaxMs != null) q = q.lte('duration_ms', f.durationMaxMs)
-  if (f.resolution) {
+  if (v11 && f.durationMinMs != null) q = q.gte('duration_ms', f.durationMinMs)
+  if (v11 && f.durationMaxMs != null) q = q.lte('duration_ms', f.durationMaxMs)
+  if (v11 && f.resolution) {
     const r = RESOLUTION_MIN[f.resolution]
     q = q.gte('width', r.w).gte('height', r.h)
   }
   if (f.uploadedFrom) q = q.gte('created_at', f.uploadedFrom)
   if (f.uploadedTo) q = q.lte('created_at', f.uploadedTo)
-  if (f.capturedFrom) q = q.gte('captured_at', f.capturedFrom)
-  if (f.capturedTo) q = q.lte('captured_at', f.capturedTo)
-  if (f.search.trim()) {
-    const s = f.search.trim()
-    q = q.or(`file_name.ilike.%${s}%`)
+  if (v11 && f.capturedFrom) q = q.gte('captured_at', f.capturedFrom)
+  if (v11 && f.capturedTo) q = q.lte('captured_at', f.capturedTo)
+  if (qSearch) {
+    if (searchIds && searchIds.length > 0) {
+      q = q.or(`file_name.ilike.%${qSearch}%,id.in.(${searchIds.slice(0, 200).join(',')})`)
+    } else {
+      q = q.ilike('file_name', `%${qSearch}%`)
+    }
   }
 
-  const { col, ascending, extra } = sortColumn(f.sort)
+  const { col, ascending, extra } = (() => {
+    const requested = sortColumn(f.sort)
+    if (!v11 && ['captured_at', 'duration_ms', 'width', 'rating', 'favorite'].includes(requested.col)) {
+      return sortColumn('newest_upload')
+    }
+    return requested
+  })()
   const cursor = opts.cursor
   if (cursor) {
     if (col === 'created_at' || col === 'captured_at') {

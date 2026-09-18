@@ -26,6 +26,9 @@ describe('data-safety source contracts', () => {
     expect(uncommented.toLowerCase()).not.toMatch(/\btruncate\b/)
     expect(src).toContain('on delete set null')
     expect(src).toContain('on conflict do nothing')
+    expect(src).toContain('files_select_own')
+    expect(src).toMatch(/using \(auth\.uid\(\) = user_id\)/)
+    expect(src).toContain('album_id is null')
   })
 
   it('api/delete never deletes R2 objects', () => {
@@ -33,5 +36,20 @@ describe('data-safety source contracts', () => {
     expect(src).not.toContain('deleteFile')
     expect(src).not.toContain('DeleteObject')
     expect(src).toContain('Permanent original deletion is disabled')
+  })
+
+  it('one-shot apply script is additive and count-guarded', () => {
+    const src = readFileSync(join(root, 'supabase/v11_apply_and_verify.sql'), 'utf8')
+    const uncommented = src.replace(/--.*$/gm, '')
+    expect(uncommented.toLowerCase()).not.toMatch(/drop table\s/)
+    expect(uncommented.toLowerCase()).not.toMatch(/\btruncate\b/)
+    expect(src).toContain('BEGIN;')
+    expect(src).toContain('COMMIT;')
+    expect(src).toMatch(/files count decreased/)
+  })
+
+  it('album gallery query does not require upload_status', () => {
+    const src = readFileSync(join(root, 'src/pages/Dashboard.tsx'), 'utf8')
+    expect(src).not.toMatch(/eq\('upload_status'/)
   })
 })

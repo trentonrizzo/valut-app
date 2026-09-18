@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../context/useAuth'
 import { useVault } from '../context/useVault'
 import { resolveVaultMedia } from '../lib/media/resolveMedia'
+import { isBlobUrl, isHttpsUrl } from '../lib/media/legacyUrl'
 
 export type VaultMediaState = {
   displayUrl: string | null
@@ -11,8 +12,8 @@ export type VaultMediaState = {
 }
 
 /**
- * Local blob URLs display immediately. Remote files resolve via authenticated signed GET,
- * with legacy public URL fallback. Encrypted originals decrypt in chunks.
+ * Local blob URLs and legacy HTTPS display immediately.
+ * Private objects resolve via authenticated signed GET.
  */
 export function useDecryptedMediaSrc(
   storedUrl: string | null | undefined,
@@ -24,10 +25,11 @@ export function useDecryptedMediaSrc(
   const { session } = useAuth()
   const { masterKey } = useVault()
   const token = session?.access_token ?? null
+  const immediate = isBlobUrl(storedUrl) || isHttpsUrl(storedUrl) ? storedUrl : null
   const [state, setState] = useState<VaultMediaState>({
-    displayUrl: storedUrl?.startsWith('blob:') ? storedUrl : null,
-    downloadUrl: storedUrl?.startsWith('blob:') ? storedUrl : null,
-    loading: Boolean(storedUrl && fileId && !storedUrl.startsWith('blob:')),
+    displayUrl: immediate,
+    downloadUrl: immediate,
+    loading: Boolean(storedUrl && !immediate),
     failed: false,
   })
 
@@ -36,20 +38,20 @@ export function useDecryptedMediaSrc(
       setState({ displayUrl: null, downloadUrl: null, loading: false, failed: false })
       return
     }
-    if (storedUrl.startsWith('blob:')) {
+    if (isBlobUrl(storedUrl)) {
       setState({ displayUrl: storedUrl, downloadUrl: storedUrl, loading: false, failed: false })
       return
     }
+    const https = isHttpsUrl(storedUrl) ? storedUrl : null
+    if (https) {
+      setState({ displayUrl: https, downloadUrl: https, loading: false, failed: false })
+    }
     if (!fileId || !token) {
-      if (/^https?:\/\//i.test(storedUrl)) {
-        setState({ displayUrl: storedUrl, downloadUrl: storedUrl, loading: false, failed: false })
-        return
-      }
-      setState({ displayUrl: null, downloadUrl: null, loading: false, failed: true })
+      if (!https) setState({ displayUrl: null, downloadUrl: null, loading: false, failed: true })
       return
     }
     let alive = true
-    setState((s) => ({ ...s, loading: true, failed: false }))
+    if (!https) setState((s) => ({ ...s, loading: true, failed: false }))
     resolveVaultMedia({
       fileId,
       accessToken: token,
@@ -62,7 +64,11 @@ export function useDecryptedMediaSrc(
       })
       .catch(() => {
         if (!alive) return
-        setState({ displayUrl: null, downloadUrl: null, loading: false, failed: true })
+        if (https) {
+          setState({ displayUrl: https, downloadUrl: https, loading: false, failed: false })
+        } else {
+          setState({ displayUrl: null, downloadUrl: null, loading: false, failed: true })
+        }
       })
     return () => {
       alive = false

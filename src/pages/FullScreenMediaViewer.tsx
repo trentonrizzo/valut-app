@@ -197,8 +197,6 @@ export function FullScreenMediaViewer() {
             .from('files')
             .select('*')
             .eq('user_id', user.id)
-            .eq('purpose', 'content')
-            .eq('upload_status', 'ready')
             .order('created_at', { ascending: false })
             .limit(48)
           const rows = ((around as FileRow[]) ?? []).filter(isGalleryFile)

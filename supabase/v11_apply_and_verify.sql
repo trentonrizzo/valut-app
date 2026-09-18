@@ -1,3 +1,20 @@
+-- Vault V1.1 ONE-SHOT apply + verify
+-- Paste this entire file into Supabase SQL Editor and Run.
+-- Additive only. Rolls back if profiles/albums/files/items counts decrease.
+-- Does not delete, truncate, or rewrite existing media objects.
+
+BEGIN;
+
+CREATE TEMP TABLE _v11_before AS
+SELECT * FROM (
+  SELECT 'profiles'::text AS entity, count(*)::bigint AS n FROM public.profiles
+  UNION ALL SELECT 'albums', count(*) FROM public.albums
+  UNION ALL SELECT 'files', count(*) FROM public.files
+  UNION ALL SELECT 'items', count(*) FROM public.items
+  UNION ALL SELECT 'files_with_album_id', count(*) FROM public.files WHERE album_id IS NOT NULL
+  UNION ALL SELECT 'files_with_https_url', count(*) FROM public.files WHERE file_url ~* '^https?://'
+) s;
+
 -- Vault V1.1 additive, backwards-compatible schema.
 -- DOES NOT drop tables, truncate, or delete existing media rows/objects.
 -- Album deletion will no longer cascade-delete files (membership only).
@@ -268,3 +285,122 @@ as $$
 $$;
 
 grant execute on function public.file_ids_with_all_tags(uuid[]) to authenticated;
+
+
+-- Additional indexes for library filters. Listing is done via PostgREST + file_ids_with_all_tags.
+
+create index if not exists files_user_width_height_idx
+  on public.files (user_id, width, height);
+
+create index if not exists album_files_user_album_idx
+  on public.album_files (user_id, album_id, added_at desc);
+
+
+-- Per-album counts without loading every file row into the client.
+create or replace function public.album_content_stats()
+returns table (album_id uuid, item_count bigint, total_bytes bigint)
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select af.album_id,
+         count(*)::bigint as item_count,
+         coalesce(sum(f.file_size_bytes), 0)::bigint as total_bytes
+  from public.album_files af
+  join public.files f on f.id = af.file_id
+  where af.user_id = auth.uid()
+    and f.purpose = 'content'
+    and f.upload_status = 'ready'
+  group by af.album_id;
+$$;
+
+grant execute on function public.album_content_stats() to authenticated;
+
+
+DO $$
+DECLARE
+  b_profiles bigint; a_profiles bigint;
+  b_albums bigint; a_albums bigint;
+  b_files bigint; a_files bigint;
+  b_items bigint; a_items bigint;
+  fk_def text;
+  backfill_gap bigint;
+BEGIN
+  SELECT n INTO b_profiles FROM _v11_before WHERE entity = 'profiles';
+  SELECT n INTO b_albums FROM _v11_before WHERE entity = 'albums';
+  SELECT n INTO b_files FROM _v11_before WHERE entity = 'files';
+  SELECT n INTO b_items FROM _v11_before WHERE entity = 'items';
+  SELECT count(*) INTO a_profiles FROM public.profiles;
+  SELECT count(*) INTO a_albums FROM public.albums;
+  SELECT count(*) INTO a_files FROM public.files;
+  SELECT count(*) INTO a_items FROM public.items;
+
+  IF a_profiles < b_profiles THEN
+    RAISE EXCEPTION 'profiles count decreased: % -> %', b_profiles, a_profiles;
+  END IF;
+  IF a_albums < b_albums THEN
+    RAISE EXCEPTION 'albums count decreased: % -> %', b_albums, a_albums;
+  END IF;
+  IF a_files < b_files THEN
+    RAISE EXCEPTION 'files count decreased: % -> %', b_files, a_files;
+  END IF;
+  IF a_items < b_items THEN
+    RAISE EXCEPTION 'items count decreased: % -> %', b_items, a_items;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'files' AND column_name = 'storage_key'
+  ) THEN
+    RAISE EXCEPTION 'files.storage_key missing';
+  END IF;
+
+  IF to_regclass('public.album_files') IS NULL THEN RAISE EXCEPTION 'album_files missing'; END IF;
+  IF to_regclass('public.tags') IS NULL THEN RAISE EXCEPTION 'tags missing'; END IF;
+  IF to_regclass('public.file_tags') IS NULL THEN RAISE EXCEPTION 'file_tags missing'; END IF;
+  IF to_regclass('public.storage_orphans') IS NULL THEN RAISE EXCEPTION 'storage_orphans missing'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'files' AND column_name = 'favorite'
+  ) THEN
+    RAISE EXCEPTION 'files.favorite missing';
+  END IF;
+
+  SELECT pg_get_constraintdef(oid) INTO fk_def
+  FROM pg_constraint
+  WHERE conname = 'files_album_id_fkey' AND conrelid = 'public.files'::regclass;
+  IF fk_def IS NULL OR fk_def !~* 'on delete set null' THEN
+    RAISE EXCEPTION 'files_album_id_fkey is not ON DELETE SET NULL: %', fk_def;
+  END IF;
+
+  SELECT count(*) INTO backfill_gap
+  FROM public.files f
+  WHERE f.album_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM public.album_files af
+      WHERE af.file_id = f.id AND af.album_id = f.album_id
+    );
+  IF backfill_gap <> 0 THEN
+    RAISE EXCEPTION 'album_files backfill incomplete, gap=%', backfill_gap;
+  END IF;
+END $$;
+
+SELECT b.entity,
+       b.n AS before_count,
+       CASE b.entity
+         WHEN 'profiles' THEN (SELECT count(*) FROM public.profiles)
+         WHEN 'albums' THEN (SELECT count(*) FROM public.albums)
+         WHEN 'files' THEN (SELECT count(*) FROM public.files)
+         WHEN 'items' THEN (SELECT count(*) FROM public.items)
+         WHEN 'files_with_album_id' THEN (SELECT count(*) FROM public.files WHERE album_id IS NOT NULL)
+         WHEN 'files_with_https_url' THEN (SELECT count(*) FROM public.files WHERE file_url ~* '^https?://')
+       END AS after_count,
+       pg_get_constraintdef((
+         SELECT oid FROM pg_constraint
+         WHERE conname = 'files_album_id_fkey' AND conrelid = 'public.files'::regclass
+       )) AS files_album_id_fkey
+FROM _v11_before b
+ORDER BY b.entity;
+
+COMMIT;

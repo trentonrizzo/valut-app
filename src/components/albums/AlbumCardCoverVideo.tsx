@@ -51,7 +51,7 @@ export function AlbumCardCoverVideo({ src, className }: Props) {
       <video
         ref={videoRef}
         className={className}
-        src={src}
+        src={src.includes('#') || src.startsWith('blob:') ? src : `${src}#t=0.1`}
         muted
         playsInline
         loop

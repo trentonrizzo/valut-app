@@ -152,9 +152,15 @@ export async function unlockWithRecovery(userId: string, recoveryInput: string):
 }
 
 export async function resolveVaultKeyStatus(userId: string): Promise<VaultKeyStatus> {
+  let row: { vault_wrap_salt: string | null; vault_wrapped_master_key: string | null } | null = null
+  try {
+    row = await fetchVaultWrapRow(userId)
+  } catch {
+    return { state: 'missing' }
+  }
+  const wrapped = Boolean(row?.vault_wrapped_master_key)
+  if (!wrapped) return { state: 'missing' }
   const local = await loadLocalMasterKey()
   if (local) return { state: 'ready', key: local }
-  const row = await fetchVaultWrapRow(userId)
-  if (row?.vault_wrapped_master_key) return { state: 'needs-unlock' }
-  return { state: 'missing' }
+  return { state: 'needs-unlock' }
 }

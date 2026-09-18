@@ -81,6 +81,9 @@ export function Dashboard() {
     purpose?: string | null
     is_encrypted?: boolean | null
     mime_type?: string | null
+    storage_key?: string | null
+    thumbnail_key?: string | null
+    poster_key?: string | null
   }
 
   function isGalleryFile(f: FileRow): boolean {
@@ -90,6 +93,7 @@ export function Dashboard() {
   const [files, setFiles] = useState<FileRow[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesError, setFilesError] = useState<string | null>(null)
+  const [filesHasMore, setFilesHasMore] = useState(false)
 
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -485,15 +489,14 @@ export function Dashboard() {
           .select('*')
           .eq('album_id', openAlbumId)
           .eq('user_id', user.id)
-          .eq('purpose', 'content')
-          .eq('upload_status', 'ready')
           .order('created_at', { ascending: false })
           .limit(48)
 
         if (error) throw new Error(error.message)
         if (!cancelled) {
-          const rows = (data as FileRow[]) ?? []
-          setFiles(rows.filter(isGalleryFile))
+          const rows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
+          setFiles(rows)
+          setFilesHasMore(((data as FileRow[]) ?? []).length >= 48)
         }
       } catch (e) {
         if (cancelled) return
@@ -842,11 +845,20 @@ export function Dashboard() {
             </div>
             ) : null}
 
-            {filesLoading ? (
-            <div className="vault-loading">Loading files…</div>
+            {filesLoading && files.length === 0 ? (
+            <ul className="vault-grid vault-grid--gallery" style={{ ['--vault-gallery-cols' as string]: String(galleryCols) } as CSSProperties}>
+              {Array.from({ length: 8 }).map((_, i) => (
+                <li key={`sk-${i}`} className="vault-photo-item">
+                  <div className="vault-photo-tile">
+                    <div className="vault-photo-tile__media vault-photo-tile__media--skeleton" />
+                  </div>
+                </li>
+              ))}
+            </ul>
             ) : files.length === 0 ? (
             <div className="vault-empty">No files in this album yet.</div>
             ) : (
+            <>
             <ul
               className="vault-grid vault-grid--gallery"
               style={
@@ -919,6 +931,39 @@ export function Dashboard() {
                 )
               })}
             </ul>
+            {filesHasMore ? (
+              <div className="library-more">
+                <button
+                  type="button"
+                  className="btn btn--outline"
+                  disabled={filesLoading}
+                  onClick={async () => {
+                    if (!user || !openAlbumId) return
+                    setFilesLoading(true)
+                    try {
+                      const { data, error } = await supabase
+                        .from('files')
+                        .select('*')
+                        .eq('album_id', openAlbumId)
+                        .eq('user_id', user.id)
+                        .order('created_at', { ascending: false })
+                        .range(files.length, files.length + 47)
+                      if (error) throw new Error(error.message)
+                      const rows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
+                      setFiles((prev) => [...prev, ...rows.filter((r) => !prev.some((p) => p.id === r.id))])
+                      setFilesHasMore(((data as FileRow[]) ?? []).length >= 48)
+                    } catch (e) {
+                      showToast(e instanceof Error ? e.message : 'Could not load more', 'error')
+                    } finally {
+                      setFilesLoading(false)
+                    }
+                  }}
+                >
+                  {filesLoading ? 'Loading…' : 'Load more'}
+                </button>
+              </div>
+            ) : null}
+            </>
             )}
 
             {fileActionTarget ? (
