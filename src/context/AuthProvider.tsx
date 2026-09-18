@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { ensureUserProfile } from '../lib/ensureUserProfile'
-import { clearEncryptionSession, ensureEncryptionKey } from '../lib/vaultCrypto'
 import { AuthContext } from './auth-context'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -20,9 +19,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false)
       if (s?.user) {
         void ensureUserProfile(s.user)
-        void ensureEncryptionKey(s.user.id).catch(() => {})
-      } else {
-        clearEncryptionSession()
       }
     })
 
@@ -34,9 +30,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false)
       if (s?.user) {
         void ensureUserProfile(s.user)
-        void ensureEncryptionKey(s.user.id).catch(() => {})
-      } else {
-        clearEncryptionSession()
       }
     })
 
@@ -51,7 +44,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) return { error: new Error(error.message) }
     if (data.user) {
       await ensureUserProfile(data.user)
-      void ensureEncryptionKey(data.user.id).catch(() => {})
     }
     return { error: null }
   }, [])
@@ -61,13 +53,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) return { error: new Error(error.message) }
     if (data.user && data.session) {
       await ensureUserProfile(data.user)
-      void ensureEncryptionKey(data.user.id).catch(() => {})
     }
     return { error: null }
   }, [])
 
   const signOut = useCallback(async () => {
-    clearEncryptionSession()
     await supabase.auth.signOut()
   }, [])
 

@@ -3,7 +3,8 @@ import { BottomNav } from './BottomNav'
 
 export function AppShell() {
   const { pathname } = useLocation()
-  const hideBottomNav = /^\/albums\/[^/]+(\/media\/[^/]+)?$/.test(pathname)
+  const hideBottomNav =
+    /^\/albums\/[^/]+(\/media\/[^/]+)?$/.test(pathname) || /^\/library\/media\/[^/]+$/.test(pathname)
 
   return (
     <div className="app-shell">

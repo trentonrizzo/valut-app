@@ -158,24 +158,52 @@ export function FullScreenMediaViewer() {
   )
 
   useEffect(() => {
-    if (!user || !albumId) return
+    if (!user || !fileId) return
     let cancelled = false
     setLoading(true)
     setError(null)
     ;(async () => {
       try {
-        const { data, error: qError } = await supabase
-          .from('files')
-          .select('*')
-          .eq('album_id', albumId)
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-        if (cancelled) return
-        if (qError) throw new Error(qError.message)
-        const rows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
-        setFiles(rows)
-        if (fileId && !rows.some((r) => r.id === fileId)) {
-          navigate(`/albums/${albumId}`, { replace: true })
+        if (albumId) {
+          const { data, error: qError } = await supabase
+            .from('files')
+            .select('*')
+            .eq('album_id', albumId)
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(80)
+          if (cancelled) return
+          if (qError) throw new Error(qError.message)
+          const rows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
+          if (!rows.some((r) => r.id === fileId)) {
+            const { data: one } = await supabase.from('files').select('*').eq('id', fileId).eq('user_id', user.id).maybeSingle()
+            if (one) rows.unshift(one as FileRow)
+            else {
+              navigate(`/albums/${albumId}`, { replace: true })
+              return
+            }
+          }
+          setFiles(rows)
+        } else {
+          const { data: one, error: qError } = await supabase
+            .from('files')
+            .select('*')
+            .eq('id', fileId)
+            .eq('user_id', user.id)
+            .maybeSingle()
+          if (qError) throw new Error(qError.message)
+          if (!one) throw new Error('Not found')
+          const { data: around } = await supabase
+            .from('files')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('purpose', 'content')
+            .eq('upload_status', 'ready')
+            .order('created_at', { ascending: false })
+            .limit(48)
+          const rows = ((around as FileRow[]) ?? []).filter(isGalleryFile)
+          if (!rows.some((r) => r.id === fileId)) rows.unshift(one as FileRow)
+          setFiles(rows)
         }
       } catch (e) {
         if (!cancelled) {
@@ -209,17 +237,18 @@ export function FullScreenMediaViewer() {
   }, [])
 
   const goClose = useCallback(() => {
-    if (!albumId) return
-    navigate(`/albums/${albumId}`, { state: location.state })
+    if (albumId) navigate(`/albums/${albumId}`, { state: location.state })
+    else navigate('/library', { state: location.state })
   }, [albumId, navigate, location.state])
 
   const goToIndex = useCallback(
     (next: number) => {
-      if (!albumId || displayFiles.length === 0) return
+      if (displayFiles.length === 0) return
       const clamped = Math.max(0, Math.min(displayFiles.length - 1, next))
       const f = displayFiles[clamped]
       if (!f) return
-      navigate(`/albums/${albumId}/media/${f.id}`, {
+      const path = albumId ? `/albums/${albumId}/media/${f.id}` : `/library/media/${f.id}`
+      navigate(path, {
         replace: true,
         state: location.state,
       })
@@ -319,7 +348,7 @@ export function FullScreenMediaViewer() {
 
   const dismissStyle = dragY > 0 ? { transform: `translateY(${dragY}px)`, opacity: Math.max(0.35, 1 - dragY / 420) } : undefined
 
-  if (!albumId || !fileId) return null
+  if (!fileId) return null
 
   if (loading) {
     return (
@@ -435,9 +464,10 @@ export function FullScreenMediaViewer() {
         >
           {displayFiles.map((f, i) => {
             const vid = isVideo(f.file_name)
+            const nearby = Math.abs(i - index) <= 1
             return (
               <div key={f.id} className="fs-media-viewer__slide" style={{ width: slideW > 0 ? slideW : '100%' }}>
-                {user ? (
+                {user && nearby ? (
                   vid ? (
                     <SlideVideo
                       file={f}

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { useDecryptedMediaSrc } from '../../hooks/useDecryptedMediaSrc'
+import { useAuth } from '../../context/useAuth'
+import { useVault } from '../../context/useVault'
+import { resolveVaultMedia } from '../../lib/media/resolveMedia'
 import { isVideoFileName } from '../../lib/mediaTypes'
 
 export type VaultPhotoFile = {
@@ -7,6 +9,9 @@ export type VaultPhotoFile = {
   file_name: string
   file_url: string
   is_encrypted?: boolean | null
+  mime_type?: string | null
+  thumbnail_key?: string | null
+  poster_key?: string | null
 }
 
 type Props = {
@@ -21,7 +26,6 @@ function VideoTilePoster({ src }: { src: string }) {
   useEffect(() => {
     const v = videoRef.current
     if (!v) return
-
     const onLoaded = () => {
       const dur = v.duration
       const t = dur && Number.isFinite(dur) ? Math.min(0.12, dur * 0.02) : 0.05
@@ -43,7 +47,6 @@ function VideoTilePoster({ src }: { src: string }) {
         /* CORS / tainted */
       }
     }
-
     v.addEventListener('loadedmetadata', onLoaded)
     v.addEventListener('seeked', onSeeked)
     return () => {
@@ -63,23 +66,55 @@ function VideoTilePoster({ src }: { src: string }) {
       src={src}
       muted
       playsInline
-      preload="auto"
+      preload="metadata"
       aria-hidden
     />
   )
 }
 
-export function VaultPhotoTileMedia({ file, userId }: Props) {
-  const { displayUrl, failed } = useDecryptedMediaSrc(
-    file.file_url,
-    file.is_encrypted,
-    userId,
-    file.file_name,
-    file.id,
+export function VaultPhotoTileMedia({ file }: Props) {
+  const { session } = useAuth()
+  const { masterKey } = useVault()
+  const isVideo = Boolean(file.mime_type?.startsWith('video/')) || isVideoFileName(file.file_name)
+  const token = session?.access_token
+  const [src, setSrc] = useState<string | null>(file.file_url?.startsWith('blob:') ? file.file_url : null)
+  const [variant, setVariant] = useState<'thumb' | 'poster' | 'original'>(
+    isVideo ? (file.poster_key ? 'poster' : 'original') : file.thumbnail_key ? 'thumb' : 'original',
   )
-  const isVideo = isVideoFileName(file.file_name)
+  const [failed, setFailed] = useState(false)
 
-  if (failed || !displayUrl) {
+  useEffect(() => {
+    if (file.file_url?.startsWith('blob:')) {
+      setSrc(file.file_url)
+      return
+    }
+    if (!token) {
+      if (file.file_url && /^https?:\/\//i.test(file.file_url)) setSrc(file.file_url)
+      return
+    }
+    let alive = true
+    const preferred = isVideo ? (file.poster_key ? 'poster' : 'original') : file.thumbnail_key ? 'thumb' : 'original'
+    resolveVaultMedia({
+      fileId: file.id,
+      accessToken: token,
+      variant: preferred,
+      masterKey,
+      fallbackUrl: file.file_url,
+    })
+      .then((r) => {
+        if (!alive) return
+        setVariant(preferred)
+        setSrc(r.displayUrl)
+      })
+      .catch(() => {
+        if (alive) setFailed(true)
+      })
+    return () => {
+      alive = false
+    }
+  }, [file.id, file.file_url, file.poster_key, file.thumbnail_key, token, masterKey, isVideo])
+
+  if (failed || !src) {
     return (
       <div
         className="vault-photo-tile__media vault-photo-tile__media--failed"
@@ -88,9 +123,9 @@ export function VaultPhotoTileMedia({ file, userId }: Props) {
     )
   }
 
-  return isVideo ? (
-    <VideoTilePoster key={displayUrl} src={displayUrl} />
-  ) : (
-    <img className="vault-photo-tile__thumb-img" src={displayUrl} alt="" loading="lazy" />
-  )
+  if (isVideo && variant === 'original') {
+    return <VideoTilePoster key={src} src={src} />
+  }
+
+  return <img className="vault-photo-tile__thumb-img" src={src} alt="" loading="lazy" />
 }

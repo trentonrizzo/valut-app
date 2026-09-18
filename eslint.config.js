@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'public/sw.js']),
   ...tseslint.config(
     js.configs.recommended,
     ...tseslint.configs.recommended,
@@ -27,6 +27,7 @@ export default defineConfig([
           'error',
           { argsIgnorePattern: '^_', varsIgnorePattern: '^[A-Z_]' },
         ],
+        'react-hooks/set-state-in-effect': 'off',
       },
     },
     {

@@ -1,74 +1,29 @@
 import { supabase } from './supabase'
 import { isVideoFileName } from './mediaTypes'
 import type { AlbumRow, AlbumWithMeta } from '../types/album'
+import type { FileRow } from '../types/media'
 
-/** Minimal file row for dashboard aggregation and previews */
 export type FileRowForAlbumMeta = {
   id: string
-  album_id: string
+  album_id: string | null
   file_name: string
   file_url: string
   created_at: string
   file_size_bytes: number | null
-  /** 'content' | 'cover'; missing/null treated as content */
   purpose: string | null
   is_encrypted: boolean | null
 }
 
-export function isContentFile(f: FileRowForAlbumMeta): boolean {
-  return f.purpose !== 'cover'
-}
-
-function sumContentFileBytes(files: FileRowForAlbumMeta[]): number {
-  let sum = 0
-  for (const f of files) {
-    if (!isContentFile(f)) continue
-    const n = f.file_size_bytes
-    if (n != null && Number.isFinite(n) && n >= 0) sum += n
-  }
-  return sum
-}
-
-function countContentFiles(files: FileRowForAlbumMeta[]): number {
-  return files.reduce((n, f) => (isContentFile(f) ? n + 1 : n), 0)
-}
-
-function pickNewest(files: FileRowForAlbumMeta[]): FileRowForAlbumMeta | null {
-  if (files.length === 0) return null
-  return [...files].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  )[0]
-}
-
-function previewForAlbum(album: AlbumRow, byAlbum: Map<string, FileRowForAlbumMeta[]>): {
-  previewUrl: string | null
-  previewIsVideo: boolean
-  previewIsEncrypted: boolean
-  previewFileName: string | null
-  previewFileId: string | null
-} {
-  const all = byAlbum.get(album.id) ?? []
-  const contentOnly = all.filter(isContentFile)
-
-  let file: FileRowForAlbumMeta | null = null
-
-  if (album.cover_file_id) {
-    file = all.find((f) => f.id === album.cover_file_id) ?? null
-  }
-  if (!file) {
-    file = pickNewest(contentOnly)
-  }
-
+function metaFromFile(file: Pick<FileRow, 'id' | 'file_name' | 'file_url' | 'is_encrypted'> | null) {
   if (!file) {
     return {
-      previewUrl: null,
+      previewUrl: null as string | null,
       previewIsVideo: false,
       previewIsEncrypted: false,
-      previewFileName: null,
-      previewFileId: null,
+      previewFileName: null as string | null,
+      previewFileId: null as string | null,
     }
   }
-
   return {
     previewUrl: file.file_url,
     previewIsVideo: isVideoFileName(file.file_name),
@@ -78,37 +33,17 @@ function previewForAlbum(album: AlbumRow, byAlbum: Map<string, FileRowForAlbumMe
   }
 }
 
-/**
- * Build album metadata from album rows and all files for the user.
- * Item count and storage use only purpose=content (legacy rows without purpose count as content).
- * Preview uses custom cover when set, else newest content file.
- */
-export function buildAlbumsWithMeta(
-  albums: AlbumRow[],
-  allFiles: FileRowForAlbumMeta[],
-): AlbumWithMeta[] {
-  const byAlbum = new Map<string, FileRowForAlbumMeta[]>()
-  for (const f of allFiles) {
-    const arr = byAlbum.get(f.album_id)
-    if (arr) arr.push(f)
-    else byAlbum.set(f.album_id, [f])
-  }
+export function isContentFile(f: FileRowForAlbumMeta): boolean {
+  return f.purpose !== 'cover'
+}
 
-  return albums.map((album) => {
-    const list = byAlbum.get(album.id) ?? []
-    const { previewUrl, previewIsVideo, previewIsEncrypted, previewFileName, previewFileId } =
-      previewForAlbum(album, byAlbum)
-    return {
-      ...album,
-      itemCount: countContentFiles(list),
-      totalBytes: sumContentFileBytes(list),
-      previewUrl,
-      previewIsVideo,
-      previewIsEncrypted,
-      previewFileName,
-      previewFileId,
-    }
-  })
+export function buildAlbumsWithMeta(albums: AlbumRow[], _allFiles: FileRowForAlbumMeta[] = []): AlbumWithMeta[] {
+  return albums.map((album) => ({
+    ...album,
+    itemCount: 0,
+    totalBytes: 0,
+    ...metaFromFile(null),
+  }))
 }
 
 export async function fetchAlbumsWithCounts(userId: string) {
@@ -123,19 +58,55 @@ export async function fetchAlbumsWithCounts(userId: string) {
   }
 
   const albumRows = (albumsRes.data ?? []) as AlbumRow[]
-
-  const filesRes = await supabase
-    .from('files')
-    .select('id, album_id, file_name, file_url, created_at, file_size_bytes, purpose, is_encrypted')
-    .eq('user_id', userId)
-
-  if (filesRes.error) {
-    return { data: null as AlbumWithMeta[] | null, error: filesRes.error.message }
+  const { data: stats, error: statsErr } = await supabase.rpc('album_content_stats')
+  if (statsErr) {
+    return { data: null as AlbumWithMeta[] | null, error: statsErr.message }
+  }
+  const byAlbum = new Map<string, { item_count: number; total_bytes: number }>()
+  for (const row of (stats as { album_id: string; item_count: number; total_bytes: number }[] | null) ?? []) {
+    byAlbum.set(row.album_id, { item_count: Number(row.item_count), total_bytes: Number(row.total_bytes) })
   }
 
-  const fileRows = (filesRes.data ?? []) as FileRowForAlbumMeta[]
-  return {
-    data: buildAlbumsWithMeta(albumRows, fileRows),
-    error: null as string | null,
+  const coverIds = albumRows.map((a) => a.cover_file_id).filter((id): id is string => Boolean(id))
+  const coverMap = new Map<string, FileRow>()
+  if (coverIds.length > 0) {
+    const { data: covers, error: cErr } = await supabase
+      .from('files')
+      .select('id, file_name, file_url, is_encrypted, mime_type')
+      .eq('user_id', userId)
+      .in('id', coverIds)
+    if (cErr) return { data: null as AlbumWithMeta[] | null, error: cErr.message }
+    for (const c of (covers ?? []) as FileRow[]) coverMap.set(c.id, c)
   }
+
+  const missing = albumRows.filter((a) => !a.cover_file_id || !coverMap.has(a.cover_file_id))
+  const fallback = new Map<string, FileRow>()
+  await Promise.all(
+    missing.map(async (album) => {
+      const { data } = await supabase
+        .from('album_files')
+        .select('file_id, files(id, file_name, file_url, is_encrypted, mime_type)')
+        .eq('user_id', userId)
+        .eq('album_id', album.id)
+        .order('added_at', { ascending: false })
+        .limit(1)
+      const row = data?.[0] as { files?: FileRow | FileRow[] | null } | undefined
+      const file = Array.isArray(row?.files) ? row?.files[0] : row?.files
+      if (file) fallback.set(album.id, file)
+    }),
+  )
+
+  const data: AlbumWithMeta[] = albumRows.map((album) => {
+    const st = byAlbum.get(album.id)
+    const cover = album.cover_file_id ? coverMap.get(album.cover_file_id) : undefined
+    const file = cover ?? fallback.get(album.id) ?? null
+    return {
+      ...album,
+      itemCount: st?.item_count ?? 0,
+      totalBytes: st?.total_bytes ?? 0,
+      ...metaFromFile(file),
+    }
+  })
+
+  return { data, error: null as string | null }
 }

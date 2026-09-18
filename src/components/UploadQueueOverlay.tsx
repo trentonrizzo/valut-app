@@ -8,6 +8,9 @@ export type UploadQueueItem = {
   progress: number
   status: UploadQueueStatus
   error: string | null
+  speedText?: string | null
+  etaText?: string | null
+  stateLabel?: string | null
 }
 
 type Props = {
@@ -134,6 +137,12 @@ export function UploadQueueOverlay({
                 {item.error ? (
                   <p className="vault-upload-queue__err" role="alert">
                     {item.error}
+                  </p>
+                ) : item.speedText || item.stateLabel ? (
+                  <p className="vault-upload-queue__err">
+                    {item.stateLabel}
+                    {item.speedText ? ` · ${item.speedText}` : ''}
+                    {item.etaText ? ` · ${item.etaText}` : ''}
                   </p>
                 ) : null}
                 {item.status === 'failed' && onRetry ? (

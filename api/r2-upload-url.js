@@ -1,80 +1,69 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { PutObjectCommand } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { requireAuthenticatedUser } from './_auth.js'
+import { sendJson } from './_json.js'
+import { getBucket, getR2Client } from './storage/_s3.js'
+import { originalKey } from './storage/_keys.js'
 
-const s3 = new S3Client({
-  region: "auto",
-  endpoint: process.env.R2_ENDPOINT,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-  },
-  forcePathStyle: true,
-});
+const PUT_EXPIRES = 60 * 60
 
-function sanitizeFileName(input) {
-  const base = String(input ?? "").trim().split(/[\\/]/).pop() || "file";
-  const sanitized = base
-    .replace(/[^a-zA-Z0-9._-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^[-.]+|[-.]+$/g, "");
-  return sanitized || "file";
-}
-
+/**
+ * V1 compatibility endpoint — NOW REQUIRES a Supabase JWT.
+ * Mints a user-scoped object key. Does not return a durable public URL.
+ */
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  if (req.method !== 'POST') {
+    return sendJson(res, 405, { ok: false, error: 'Method not allowed' })
   }
 
   try {
-    let body = req.body;
+    const { user } = await requireAuthenticatedUser(req)
 
-    if (typeof body === "string") {
+    let body = req.body
+    if (typeof body === 'string') {
       try {
-        body = JSON.parse(body);
+        body = JSON.parse(body)
       } catch {
-        body = null;
+        body = null
       }
     }
-
-    if (!body || typeof body !== "object") {
-      return res.status(200).json({ ok: false, error: "Invalid JSON body" });
+    if (!body || typeof body !== 'object') {
+      return sendJson(res, 400, { ok: false, error: 'Invalid JSON body' })
+    }
+    if (body.userId && body.userId !== user.id) {
+      return sendJson(res, 403, { ok: false, error: 'User mismatch' })
     }
 
-    const fileName = body.fileName;
-    if (!fileName) {
-      return res.status(200).json({ ok: false, error: "fileName is required" });
-    }
-
-    const bucket =
-      process.env.R2_BUCKET || process.env.R2_BUCKET_NAME || "vault-storage";
-    const publicBase = String(process.env.R2_PUBLIC_URL || "").replace(/\/+$/, "");
-
-    if (!bucket || !publicBase) {
-      return res.status(200).json({
-        ok: false,
-        error: "R2 is not configured (need R2_BUCKET and R2_PUBLIC_URL)",
-      });
-    }
-
-    const sanitizedFileName = sanitizeFileName(fileName);
-    const key = `uploads/${Date.now()}-${sanitizedFileName}`;
-    const segments = key.split("/").filter(Boolean).map((s) => encodeURIComponent(s));
-    const fileUrl = `${publicBase}/${segments.join("/")}`;
+    const objectId = typeof body.objectId === 'string' && body.objectId.trim()
+      ? body.objectId.trim()
+      : crypto.randomUUID()
+    const contentType =
+      typeof body.contentType === 'string' && body.contentType.trim()
+        ? body.contentType.trim()
+        : 'application/octet-stream'
+    const key = originalKey(user.id, objectId)
 
     const command = new PutObjectCommand({
-      Bucket: bucket,
+      Bucket: getBucket(),
       Key: key,
-      ContentType: "application/octet-stream",
-    });
+      ContentType: contentType,
+    })
+    const uploadUrl = await getSignedUrl(getR2Client(), command, { expiresIn: PUT_EXPIRES })
 
-    const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 60 });
-
-    return res.status(200).json({ ok: true, uploadUrl, fileUrl, key });
+    return sendJson(res, 200, {
+      ok: true,
+      uploadUrl,
+      key,
+      objectId,
+      fileUrl: null,
+      expiresIn: PUT_EXPIRES,
+    })
   } catch (err) {
-    console.error(err);
-    return res.status(200).json({
+    const status = err?.statusCode || 400
+    console.error(err)
+    return sendJson(res, status, {
       ok: false,
-      error: err instanceof Error ? err.message : "Failed to create upload URL",
-    });
+      error: err instanceof Error ? err.message : 'Failed to create upload URL',
+    })
   }
 }

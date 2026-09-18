@@ -484,7 +484,10 @@ export function Dashboard() {
           .select('*')
           .eq('album_id', openAlbumId)
           .eq('user_id', user.id)
+          .eq('purpose', 'content')
+          .eq('upload_status', 'ready')
           .order('created_at', { ascending: false })
+          .limit(48)
 
         if (error) throw new Error(error.message)
         if (!cancelled) {
@@ -946,23 +949,23 @@ export function Dashboard() {
                     <button
                       type="button"
                       className="vault-action-sheet__item"
-                      disabled={!fileActionMedia.downloadUrl}
+                      disabled={!fileActionTarget.file_url || !/^https?:\/\//i.test(fileActionTarget.file_url)}
                       onClick={async () => {
-                        const url = fileActionMedia.downloadUrl
-                        if (!url) {
-                          showToast('Link not ready yet', 'error')
+                        const stored = fileActionTarget.file_url
+                        if (!stored || !/^https?:\/\//i.test(stored)) {
+                          showToast('Private files have no public link', 'error')
                           return
                         }
                         try {
-                          await navigator.clipboard.writeText(url)
-                          showToast('Link copied')
+                          await navigator.clipboard.writeText(stored)
+                          showToast('Legacy public link copied')
                         } catch {
                           showToast('Could not copy link', 'error')
                         }
                         setFileActionTarget(null)
                       }}
                     >
-                      Copy link
+                      Copy public link
                     </button>
                     <button
                       type="button"
