@@ -60,7 +60,7 @@ export async function fetchAlbumsWithCounts(userId: string) {
   const albumRows = (albumsRes.data ?? []) as AlbumRow[]
   const { data: stats, error: statsErr } = await supabase.rpc('album_content_stats')
   if (statsErr) {
-    return { data: null as AlbumWithMeta[] | null, error: statsErr.message }
+    return fetchAlbumsWithCountsLegacy(userId, albumRows)
   }
   const byAlbum = new Map<string, { item_count: number; total_bytes: number }>()
   for (const row of (stats as { album_id: string; item_count: number; total_bytes: number }[] | null) ?? []) {
@@ -108,5 +108,48 @@ export async function fetchAlbumsWithCounts(userId: string) {
     }
   })
 
+  return { data, error: null as string | null }
+}
+
+/** V1-compatible album list when V1.1 RPCs/tables are not applied yet. */
+async function fetchAlbumsWithCountsLegacy(userId: string, albumRows: AlbumRow[]) {
+  const { data: files, error } = await supabase
+    .from('files')
+    .select('id, album_id, file_name, file_url, is_encrypted, mime_type, file_size_bytes, purpose, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1000)
+  if (error) return { data: null as AlbumWithMeta[] | null, error: error.message }
+
+  const byAlbum = new Map<string, { item_count: number; total_bytes: number; preview: FileRow | null }>()
+  for (const raw of files ?? []) {
+    const f = raw as FileRow & { album_id: string | null }
+    if (!f.album_id) continue
+    const st = byAlbum.get(f.album_id) ?? { item_count: 0, total_bytes: 0, preview: null }
+    if (f.purpose !== 'cover') {
+      st.item_count += 1
+      st.total_bytes += Number(f.file_size_bytes ?? 0)
+      if (!st.preview) st.preview = f
+    }
+    byAlbum.set(f.album_id, st)
+  }
+
+  const coverIds = albumRows.map((a) => a.cover_file_id).filter((id): id is string => Boolean(id))
+  const coverMap = new Map<string, FileRow>()
+  for (const f of (files ?? []) as FileRow[]) {
+    if (coverIds.includes(f.id)) coverMap.set(f.id, f)
+  }
+
+  const data: AlbumWithMeta[] = albumRows.map((album) => {
+    const st = byAlbum.get(album.id)
+    const cover = album.cover_file_id ? coverMap.get(album.cover_file_id) : undefined
+    const file = cover ?? st?.preview ?? null
+    return {
+      ...album,
+      itemCount: st?.item_count ?? 0,
+      totalBytes: st?.total_bytes ?? 0,
+      ...metaFromFile(file),
+    }
+  })
   return { data, error: null as string | null }
 }

@@ -4,6 +4,7 @@ import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
 import { buildAlbumsWithMeta, fetchAlbumsWithCounts } from '../lib/albumQueries'
+import { isV11SchemaReady } from '../lib/schemaGuard'
 import { formatBytes } from '../lib/formatBytes'
 import { isVideoFileName } from '../lib/mediaTypes'
 import type { AlbumRow, AlbumWithMeta } from '../types/album'
@@ -591,6 +592,12 @@ export function Dashboard() {
     const id = removed.id
 
     try {
+      const schemaReady = await isV11SchemaReady()
+      if (!schemaReady) {
+        throw new Error(
+          'V1.1 database migration is not applied yet. Album delete is blocked because the live schema still cascade-deletes files.',
+        )
+      }
       const { error } = await supabase.from('albums').delete().eq('id', id).eq('user_id', user.id)
       if (error) throw new Error(error.message)
       setAlbums((prev) => prev.filter((a) => a.id !== id))

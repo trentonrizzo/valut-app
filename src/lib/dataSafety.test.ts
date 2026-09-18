@@ -27,4 +27,11 @@ describe('data-safety source contracts', () => {
     expect(src).toContain('on delete set null')
     expect(src).toContain('on conflict do nothing')
   })
+
+  it('api/delete never deletes R2 objects', () => {
+    const src = readFileSync(join(root, 'api/delete.js'), 'utf8')
+    expect(src).not.toContain('deleteFile')
+    expect(src).not.toContain('DeleteObject')
+    expect(src).toContain('Permanent original deletion is disabled')
+  })
 })
