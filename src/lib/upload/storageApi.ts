@@ -65,7 +65,10 @@ export async function apiMultipartListParts(
   args: { key: string; uploadId: string },
 ) {
   return call<{ ok: true; parts: { PartNumber: number; ETag: string; Size: number }[] }>('part-list', () =>
-    authFetch('/api/storage/multipart-list-parts', { method: 'POST', body: JSON.stringify(args) }),
+    authFetch('/api/storage/multipart-complete', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'list', ...args }),
+    }),
   )
 }
 
@@ -75,7 +78,7 @@ export async function apiMultipartComplete(
 ) {
   return call<{ ok: true; key: string; verified?: boolean; contentLength?: number; alreadyComplete?: boolean }>(
     'multipart-complete',
-    () => authFetch('/api/storage/multipart-complete', { method: 'POST', body: JSON.stringify(args) }),
+    () => authFetch('/api/storage/multipart-complete', { method: 'POST', body: JSON.stringify({ action: 'complete', ...args }) }),
   )
 }
 
@@ -85,7 +88,10 @@ export async function apiVerifyObject(
 ) {
   return call<{ ok: true; verified: true; key: string; contentLength: number; contentType: string | null; etag: string | null }>(
     'r2-verify',
-    () => authFetch('/api/storage/verify-object', { method: 'POST', body: JSON.stringify(args) }),
+    () => authFetch('/api/storage/multipart-complete', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'verify', ...args }),
+    }),
   )
 }
 

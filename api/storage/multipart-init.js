@@ -3,7 +3,7 @@ import { requireAuthenticatedUser } from '../_auth.js'
 import { readJsonBody, sendJson } from '../_json.js'
 import { getBucket, getR2Client } from './_s3.js'
 import { assertOwnKey, originalKey } from './_keys.js'
-import { ensureBrowserUploadCors } from './_cors.js'
+import { ensureBrowserUploadCors } from './_s3.js'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
