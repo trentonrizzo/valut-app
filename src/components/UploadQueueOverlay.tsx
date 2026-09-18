@@ -1,4 +1,11 @@
-export type UploadQueueStatus = 'queued' | 'preparing' | 'uploading' | 'done' | 'failed'
+export type UploadQueueStatus =
+  | 'queued'
+  | 'preparing'
+  | 'uploading'
+  | 'finalizing'
+  | 'retrying'
+  | 'done'
+  | 'failed'
 
 export type UploadQueueItem = {
   id: string
@@ -11,6 +18,12 @@ export type UploadQueueItem = {
   speedText?: string | null
   etaText?: string | null
   stateLabel?: string | null
+  uploadedBytes?: number
+  needsFile?: boolean
+  canPause?: boolean
+  canResume?: boolean
+  canRetry?: boolean
+  bytesText?: string | null
 }
 
 type Props = {
@@ -23,19 +36,29 @@ type Props = {
   currentFileName: string | null
   currentFilePercent: number | null
   onRetry?: (id: string) => void
+  onRetryAll?: () => void
+  onPause?: (id: string) => void
+  onResume?: (id: string) => void
+  onCancel?: (id: string) => void
+  onReselect?: (id: string, file: File) => void
   onDismiss?: () => void
 }
 
-function statusLabel(status: UploadQueueStatus): string {
-  switch (status) {
+function statusLabel(item: UploadQueueItem): string {
+  if (item.stateLabel) return item.stateLabel
+  switch (item.status) {
     case 'queued':
       return 'Queued'
     case 'preparing':
-      return 'Preparing…'
+      return 'Preparing'
     case 'uploading':
       return 'Uploading'
+    case 'finalizing':
+      return 'Finalizing…'
+    case 'retrying':
+      return 'Retrying'
     case 'done':
-      return 'Done'
+      return 'Complete'
     case 'failed':
       return 'Failed'
     default:
@@ -53,44 +76,62 @@ export function UploadQueueOverlay({
   currentFileName,
   currentFilePercent,
   onRetry,
+  onRetryAll,
+  onPause,
+  onResume,
+  onCancel,
+  onReselect,
   onDismiss,
 }: Props) {
   if (!visible) return null
 
   const hasFailed = items.some((i) => i.status === 'failed')
-  const active = items.some(
-    (i) => i.status === 'queued' || i.status === 'preparing' || i.status === 'uploading',
+  const failedCount = items.filter((i) => i.status === 'failed').length
+  const doneCount = items.filter((i) => i.status === 'done').length
+  const active = items.some((i) =>
+    ['queued', 'preparing', 'uploading', 'finalizing', 'retrying'].includes(i.status),
   )
+  const title =
+    failedCount > 0 && !active
+      ? `${failedCount} failed`
+      : doneCount === batchTotal && batchTotal > 0
+        ? 'Upload complete'
+        : batchTotal > 0
+          ? `${Math.min(batchTotal, currentFileIndex)} of ${batchTotal}`
+          : 'Uploading…'
 
   return (
     <div className="modal-backdrop vault-upload-overlay" role="presentation">
       <div
         className="vault-upload-chip vault-upload-chip--queue modal--enter"
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-labelledby="upload-queue-title"
         aria-busy={active}
         onClick={(ev) => ev.stopPropagation()}
       >
         <p id="upload-queue-title" className="vault-upload-chip__status">
-          {batchTotal > 0 ? (
-            <>
-              Uploading {currentFileIndex} of {batchTotal}…
-            </>
-          ) : (
-            'Uploading…'
-          )}
+          {title}
         </p>
         <p className="vault-upload-chip__meta">
-          <span>{overallProgress}%</span>
-          {etaText ? (
+          <span>
+            {doneCount}/{batchTotal || items.length} complete
+            {failedCount ? ` · ${failedCount} failed` : ''}
+          </span>
+          {active ? (
+            <>
+              <span className="vault-upload-chip__sep"> · </span>
+              <span>{overallProgress}%</span>
+            </>
+          ) : null}
+          {etaText && active ? (
             <>
               <span className="vault-upload-chip__sep"> · </span>
               <span className="vault-upload-chip__eta-inline">{etaText}</span>
             </>
           ) : null}
         </p>
-        {currentFileName ? (
+        {currentFileName && active ? (
           <p className="vault-upload-chip__name" title={currentFileName}>
             {currentFileName}
             {currentFilePercent != null && currentFilePercent >= 0 ? (
@@ -111,10 +152,14 @@ export function UploadQueueOverlay({
                     {item.name}
                   </span>
                   <span className="vault-upload-queue__pct">
-                    {item.status === 'failed' ? (
+                    {item.status === 'done' ? (
+                      <span className="vault-upload-queue__ok">Complete ✓</span>
+                    ) : item.status === 'failed' ? (
                       <span className="vault-upload-queue__failed">Failed</span>
-                    ) : item.status === 'queued' || item.status === 'preparing' ? (
-                      <span className="vault-upload-queue__phase">{statusLabel(item.status)}</span>
+                    ) : item.status === 'finalizing' ? (
+                      <span className="vault-upload-queue__phase">Finalizing…</span>
+                    ) : item.status === 'queued' || item.status === 'preparing' || item.status === 'retrying' ? (
+                      <span className="vault-upload-queue__phase">{statusLabel(item)}</span>
                     ) : (
                       `${item.progress}%`
                     )}
@@ -125,45 +170,78 @@ export function UploadQueueOverlay({
                     className="vault-upload-queue__bar-fill"
                     style={{
                       width: `${
-                        item.status === 'failed'
-                          ? 0
-                          : item.status === 'queued'
-                            ? 0
-                            : item.progress
+                        item.status === 'done' ? 100 : item.status === 'queued' ? 0 : item.progress
                       }%`,
                     }}
                   />
                 </div>
+                <p className="vault-upload-queue__bytes">{item.bytesText}</p>
                 {item.error ? (
                   <p className="vault-upload-queue__err" role="alert">
                     {item.error}
                   </p>
+                ) : item.status === 'finalizing' ? (
+                  <p className="vault-upload-queue__hint">Finalizing…</p>
                 ) : item.speedText || item.stateLabel ? (
-                  <p className="vault-upload-queue__err">
+                  <p className="vault-upload-queue__hint">
                     {item.stateLabel}
                     {item.speedText ? ` · ${item.speedText}` : ''}
                     {item.etaText ? ` · ${item.etaText}` : ''}
                   </p>
                 ) : null}
-                {item.status === 'failed' && onRetry ? (
-                  <button
-                    type="button"
-                    className="vault-upload-queue__retry btn btn--ghost"
-                    onClick={() => onRetry(item.id)}
-                  >
-                    Retry
-                  </button>
-                ) : null}
+                <div className="vault-upload-queue__actions">
+                  {item.canPause && onPause ? (
+                    <button type="button" className="vault-upload-queue__btn btn btn--ghost" onClick={() => onPause(item.id)}>
+                      Pause
+                    </button>
+                  ) : null}
+                  {item.canResume && onResume ? (
+                    <button type="button" className="vault-upload-queue__btn btn btn--ghost" onClick={() => onResume(item.id)}>
+                      Resume
+                    </button>
+                  ) : null}
+                  {item.canRetry && onRetry ? (
+                    <button type="button" className="vault-upload-queue__btn btn btn--ghost" onClick={() => onRetry(item.id)}>
+                      Retry
+                    </button>
+                  ) : null}
+                  {item.needsFile && onReselect ? (
+                    <label className="vault-upload-queue__btn btn btn--ghost">
+                      Reselect
+                      <input
+                        type="file"
+                        className="visually-hidden"
+                        onChange={(e) => {
+                          const f = e.currentTarget.files?.[0]
+                          e.currentTarget.value = ''
+                          if (f) onReselect(item.id, f)
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                  {onCancel && item.status !== 'done' ? (
+                    <button type="button" className="vault-upload-queue__btn btn btn--ghost" onClick={() => onCancel(item.id)}>
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
               </li>
             ))}
           </ul>
         ) : null}
 
-        {hasFailed && onDismiss ? (
-          <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onDismiss}>
-            Dismiss
-          </button>
-        ) : null}
+        <div className="vault-upload-queue__footer">
+          {hasFailed && onRetryAll ? (
+            <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onRetryAll}>
+              Retry failed
+            </button>
+          ) : null}
+          {hasFailed && onDismiss ? (
+            <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onDismiss}>
+              Dismiss failed
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   )

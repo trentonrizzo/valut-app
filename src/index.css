@@ -1614,19 +1614,24 @@ button {
   align-items: flex-end;
   justify-content: center;
   padding: 0.75rem;
-  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
-  background: rgba(0, 0, 0, 0.45);
+  padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+  padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(5.9rem + env(safe-area-inset-bottom, 0px));
+  background: rgba(0, 0, 0, 0.35);
+  overflow-x: hidden;
 }
 
 .vault-upload-chip {
   width: 100%;
-  max-width: 380px;
+  max-width: min(380px, calc(100vw - 1.5rem));
   padding: 0.65rem 0.85rem 0.75rem;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(14, 14, 14, 0.92);
+  background: rgba(14, 14, 14, 0.96);
   backdrop-filter: blur(12px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .vault-upload-chip__status {
@@ -1693,7 +1698,7 @@ button {
 }
 
 .vault-upload-chip--queue {
-  max-height: min(70vh, 420px);
+  max-height: min(58dvh, calc(100dvh - 8.5rem - env(safe-area-inset-bottom, 0px)));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1756,6 +1761,48 @@ button {
   font-size: 0.68rem;
   line-height: 1.35;
   color: #f87171;
+  overflow-wrap: anywhere;
+}
+
+.vault-upload-queue__hint {
+  margin: 0.3rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
+.vault-upload-queue__bytes {
+  margin: 0.2rem 0 0;
+  font-size: 0.64rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.vault-upload-queue__ok {
+  color: #86efac;
+  font-weight: 600;
+}
+
+.vault-upload-queue__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.vault-upload-queue__btn {
+  margin: 0;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.74rem;
+  min-height: 32px;
+}
+
+.vault-upload-queue__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+  flex-shrink: 0;
 }
 
 .vault-upload-queue__bar {

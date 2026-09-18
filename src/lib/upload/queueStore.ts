@@ -40,6 +40,11 @@ export type PersistedUploadJob = {
   durationMs: number | null
   capturedAt: string | null
   createdAt: number
+  r2Complete?: boolean
+  multipartComplete?: boolean
+  dbComplete?: boolean
+  errorCode?: string | null
+  lastModified?: number
 }
 
 const DB = 'vault-upload-queue-v11'

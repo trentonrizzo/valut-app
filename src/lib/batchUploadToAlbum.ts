@@ -56,15 +56,20 @@ function waitForJobs(ids: string[], onProgress: (p: BatchUploadProgress) => void
       const uploaded = jobs.reduce((s, j) => s + j.uploadedBytes, 0)
       const totalBytes = jobs.reduce((s, j) => s + j.size, 0)
       const done = jobs.filter((j) => j.state === 'complete' || j.state === 'failed' || j.state === 'needs-file')
-      const current = jobs.find((j) => j.state === 'uploading' || j.state === 'encrypting' || j.state === 'preparing') ?? jobs[0]
+      const current =
+        jobs.find((j) =>
+          ['uploading', 'encrypting', 'preparing', 'finalizing', 'retrying'].includes(j.state),
+        ) ?? jobs[0]
+      const allComplete = jobs.every((j) => j.state === 'complete')
+      const bytePct = totalBytes ? Math.round((uploaded / totalBytes) * 100) : 0
       onProgress({
-        progress: totalBytes ? Math.round((uploaded / totalBytes) * 100) : 0,
+        progress: allComplete ? 100 : Math.min(99, bytePct),
         fileName: current?.fileName ?? null,
         batchIndex: Math.min(ids.length, done.length + 1),
         batchTotal: ids.length,
-        etaText: current?.etaSeconds != null ? `~${current.etaSeconds}s left` : null,
+        etaText: current?.state === 'finalizing' ? 'Finalizing…' : current?.etaSeconds != null ? `~${current.etaSeconds}s left` : null,
         currentFileIndex: Math.min(ids.length, done.length + 1),
-        currentFilePercent: current?.percent,
+        currentFilePercent: current?.state === 'complete' ? 100 : Math.min(99, current?.percent ?? 0),
       })
       if (done.length === ids.length) {
         unsub()

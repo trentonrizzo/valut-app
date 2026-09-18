@@ -8,30 +8,28 @@ import { listMediaPage } from '../lib/mediaQueries'
 import { fetchAlbumsWithCounts } from '../lib/albumQueries'
 import { listTags, addTagsToFiles, removeTagsFromFiles } from '../lib/tags'
 import { addFilesToAlbum, setFavorite, setRating } from '../lib/albumMembership'
-import { enqueueFiles, getLiveUploads, subscribeUploads } from '../lib/upload/manager'
+import {
+  attachFileForResume,
+  batchTotals,
+  cancelJob,
+  dismissFailed,
+  enqueueFiles,
+  getLiveUploads,
+  pauseJob,
+  resumeJob,
+  retryAllFailed,
+  retryJob,
+  subscribeUploads,
+} from '../lib/upload/manager'
+import { liveToQueueItems } from '../lib/upload/queueUi'
+import { formatEta } from '../lib/upload/strategy'
 import { apiSignedGet } from '../lib/upload/storageApi'
 import { FilterBar } from '../components/library/FilterBar'
 import { BulkActionBar } from '../components/library/BulkActionBar'
 import { TagPickerModal } from '../components/library/TagPickerModal'
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
 import { isVideoFileName } from '../lib/mediaTypes'
-import { UploadQueueOverlay, type UploadQueueItem } from '../components/UploadQueueOverlay'
-import { formatBytes } from '../lib/formatBytes'
-
-function mapQueue(items: ReturnType<typeof getLiveUploads>): UploadQueueItem[] {
-  return items.map((j) => ({
-    id: j.id,
-    name: j.fileName,
-    size: j.size,
-    type: j.type,
-    progress: j.percent,
-    status: j.state === 'complete' ? 'done' : j.state === 'failed' || j.state === 'needs-file' ? 'failed' : j.state === 'paused' ? 'queued' : 'uploading',
-    error: j.error,
-    speedText: j.speedBps > 0 ? `${formatBytes(j.speedBps)}/s` : null,
-    etaText: j.etaSeconds != null ? (j.etaSeconds < 60 ? `~${j.etaSeconds}s` : `~${Math.round(j.etaSeconds / 60)}m`) : null,
-    stateLabel: j.state,
-  }))
-}
+import { UploadQueueOverlay } from '../components/UploadQueueOverlay'
 
 export function Library() {
   const { user, session } = useAuth()
@@ -87,8 +85,12 @@ export function Library() {
 
   const queueItems = useMemo(() => {
     void queueTick
-    return mapQueue(getLiveUploads())
+    return liveToQueueItems(getLiveUploads())
   }, [queueTick])
+  const queueTotals = batchTotals(getLiveUploads())
+  const currentUpload = getLiveUploads().find((j) =>
+    ['uploading', 'preparing', 'encrypting', 'finalizing', 'retrying'].includes(j.state),
+  )
 
   async function downloadSelected() {
     const token = session?.access_token
@@ -119,7 +121,7 @@ export function Library() {
             Upload
             <input
               type="file"
-              accept="image/*,video/*,*/*"
+              accept="image/*,video/*,.mp4,.mov,.m4v,.qt,video/mp4,video/quicktime,*/*"
               multiple
               className="visually-hidden"
               onChange={(e) => {
@@ -217,14 +219,19 @@ export function Library() {
       <UploadQueueOverlay
         visible={queueItems.some((i) => i.status !== 'done')}
         items={queueItems}
-        overallProgress={0}
-        etaText={null}
-        currentFileIndex={1}
-        batchTotal={queueItems.length}
-        currentFileName={queueItems.find((i) => i.status === 'uploading')?.name ?? null}
-        currentFilePercent={queueItems.find((i) => i.status === 'uploading')?.progress ?? null}
-        onRetry={() => {}}
-        onDismiss={() => {}}
+        overallProgress={queueTotals.percent}
+        etaText={formatEta(queueTotals.etaSeconds)}
+        currentFileIndex={queueTotals.completed + (currentUpload ? 1 : 0)}
+        batchTotal={queueTotals.total}
+        currentFileName={currentUpload?.fileName ?? null}
+        currentFilePercent={currentUpload ? queueItems.find((i) => i.id === currentUpload.id)?.progress ?? null : null}
+        onRetry={retryJob}
+        onRetryAll={retryAllFailed}
+        onPause={pauseJob}
+        onResume={resumeJob}
+        onCancel={(id) => void cancelJob(id)}
+        onReselect={attachFileForResume}
+        onDismiss={dismissFailed}
       />
     </div>
   )

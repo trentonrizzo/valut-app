@@ -3,33 +3,22 @@ import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { fetchAlbumsWithCounts } from '../lib/albumQueries'
 import type { AlbumWithMeta } from '../types/album'
-import { UploadQueueOverlay, type UploadQueueItem } from '../components/UploadQueueOverlay'
-import { enqueueFiles, getLiveUploads, resumeJob, subscribeUploads, cancelJob, batchTotals } from '../lib/upload/manager'
-import { formatBytes } from '../lib/formatBytes'
-
-function toQueueItems(): UploadQueueItem[] {
-  return getLiveUploads().map((j) => ({
-    id: j.id,
-    name: j.fileName,
-    size: j.size,
-    type: j.type,
-    progress: j.percent,
-    status:
-      j.state === 'complete'
-        ? 'done'
-        : j.state === 'failed' || j.state === 'needs-file'
-          ? 'failed'
-          : j.state === 'queued' || j.state === 'paused'
-            ? 'queued'
-            : j.state === 'preparing' || j.state === 'encrypting'
-              ? 'preparing'
-              : 'uploading',
-    error: j.error,
-    speedText: j.speedBps > 0 ? `${formatBytes(j.speedBps)}/s` : null,
-    etaText: j.etaSeconds != null ? (j.etaSeconds < 60 ? `~${j.etaSeconds}s left` : `~${Math.round(j.etaSeconds / 60)}m left`) : null,
-    stateLabel: j.state,
-  }))
-}
+import { UploadQueueOverlay } from '../components/UploadQueueOverlay'
+import {
+  attachFileForResume,
+  batchTotals,
+  cancelJob,
+  dismissFailed,
+  enqueueFiles,
+  getLiveUploads,
+  pauseJob,
+  resumeJob,
+  retryAllFailed,
+  retryJob,
+  subscribeUploads,
+} from '../lib/upload/manager'
+import { liveToQueueItems } from '../lib/upload/queueUi'
+import { formatEta, formatSpeedBps } from '../lib/upload/strategy'
 
 export function Upload() {
   const { user } = useAuth()
@@ -58,9 +47,12 @@ export function Upload() {
 
   const items = useMemo(() => {
     void tick
-    return toQueueItems()
+    return liveToQueueItems(getLiveUploads())
   }, [tick])
   const totals = batchTotals(getLiveUploads())
+  const current = getLiveUploads().find((j) =>
+    ['uploading', 'preparing', 'encrypting', 'finalizing', 'retrying'].includes(j.state),
+  )
 
   const start = useCallback(
     (files: File[]) => {
@@ -102,7 +94,7 @@ export function Upload() {
             Choose files
             <input
               type="file"
-              accept="image/*,video/*,*/*"
+              accept="image/*,video/*,.mp4,.mov,.m4v,.qt,video/mp4,video/quicktime,*/*"
               multiple
               disabled={!albumId}
               onChange={(e) => {
@@ -119,15 +111,18 @@ export function Upload() {
         visible={items.length > 0 && items.some((i) => i.status !== 'done')}
         items={items}
         overallProgress={totals.percent}
-        etaText={totals.etaSeconds != null ? `~${totals.etaSeconds < 60 ? `${totals.etaSeconds}s` : `${Math.round(totals.etaSeconds / 60)}m`} left` : null}
-        currentFileIndex={totals.completed}
+        etaText={totals.etaSeconds != null ? formatEta(totals.etaSeconds) : totals.speed ? formatSpeedBps(totals.speed) : null}
+        currentFileIndex={totals.completed + (current ? 1 : 0)}
         batchTotal={totals.total}
-        currentFileName={items.find((i) => i.status === 'uploading' || i.status === 'preparing')?.name ?? null}
-        currentFilePercent={items.find((i) => i.status === 'uploading')?.progress ?? null}
-        onRetry={(id) => resumeJob(id)}
-        onDismiss={() => {
-          for (const it of items.filter((i) => i.status === 'failed')) void cancelJob(it.id)
-        }}
+        currentFileName={current?.fileName ?? null}
+        currentFilePercent={current ? items.find((i) => i.id === current.id)?.progress ?? null : null}
+        onRetry={retryJob}
+        onRetryAll={retryAllFailed}
+        onPause={pauseJob}
+        onResume={resumeJob}
+        onCancel={(id) => void cancelJob(id)}
+        onReselect={attachFileForResume}
+        onDismiss={dismissFailed}
       />
     </div>
   )

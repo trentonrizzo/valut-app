@@ -16,6 +16,20 @@ import { AlbumCoverPickerModal } from '../components/albums/AlbumCoverPickerModa
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
 import { UploadQueueOverlay, type UploadQueueItem } from '../components/UploadQueueOverlay'
 import { batchUploadFilesToAlbum, validateUploadFileSizes } from '../lib/batchUploadToAlbum'
+import {
+  attachFileForResume,
+  batchTotals,
+  cancelJob,
+  dismissFailed,
+  getLiveUploads,
+  pauseJob,
+  resumeJob,
+  retryAllFailed,
+  retryJob,
+  subscribeUploads,
+} from '../lib/upload/manager'
+import { liveToQueueItems } from '../lib/upload/queueUi'
+import { formatEta } from '../lib/upload/strategy'
 import { sortGalleryFiles, type FileSort } from '../lib/gallerySort'
 import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
 
@@ -109,6 +123,17 @@ export function Dashboard() {
   const optimisticRowByQueueIdRef = useRef<Map<string, FileRow>>(new Map())
 
   const [uploadQueueItems, setUploadQueueItems] = useState<UploadQueueItem[]>([])
+  const [uploadLiveTick, setUploadLiveTick] = useState(0)
+
+  useEffect(() => subscribeUploads(() => setUploadLiveTick((n) => n + 1)), [])
+  const liveQueueItems = useMemo(() => {
+    void uploadLiveTick
+    return liveToQueueItems(getLiveUploads())
+  }, [uploadLiveTick])
+  const liveTotals = batchTotals(getLiveUploads())
+  const liveCurrent = getLiveUploads().find((j) =>
+    ['uploading', 'preparing', 'encrypting', 'finalizing', 'retrying'].includes(j.state),
+  )
 
   const [fileActionTarget, setFileActionTarget] = useState<FileRow | null>(null)
   const [fileInfoTarget, setFileInfoTarget] = useState<FileRow | null>(null)
@@ -740,7 +765,7 @@ export function Dashboard() {
                   Upload
                   <input
                   type="file"
-                  accept="image/*,video/*"
+                  accept="image/*,video/*,.mp4,.mov,.m4v,.qt,video/mp4,video/quicktime"
                   multiple
                   disabled={uploading || !openAlbumId}
                   onChange={(e) => {
@@ -758,8 +783,7 @@ export function Dashboard() {
                       return
                     }
                     if (uploadLockRef.current) {
-                      console.warn('UPLOAD SKIP: already uploading')
-                      return
+                      console.warn('UPLOAD: queueing additional files while others run')
                     }
                     if (!validateUploadFileSizes(filesArray)) return
 
@@ -823,20 +847,38 @@ export function Dashboard() {
 
             <UploadQueueOverlay
               visible={
+                liveQueueItems.some((i) => i.status !== 'done') ||
                 uploading ||
                 uploadQueueItems.some((i) =>
-                  ['queued', 'preparing', 'uploading', 'failed'].includes(i.status),
+                  ['queued', 'preparing', 'uploading', 'finalizing', 'retrying', 'failed'].includes(i.status),
                 )
               }
-              items={uploadQueueItems}
-              overallProgress={uploadProgress}
-              etaText={uploadEtaText}
-              currentFileIndex={uploadBatchIndex}
-              batchTotal={uploadBatchTotal}
-              currentFileName={uploadFileName}
-              currentFilePercent={uploadCurrentFilePercent}
-              onRetry={retryUploadQueueItem}
-              onDismiss={dismissFailedUploadQueue}
+              items={liveQueueItems.length ? liveQueueItems : uploadQueueItems}
+              overallProgress={liveQueueItems.length ? liveTotals.percent : uploadProgress}
+              etaText={liveQueueItems.length ? formatEta(liveTotals.etaSeconds) : uploadEtaText}
+              currentFileIndex={liveQueueItems.length ? liveTotals.completed + (liveCurrent ? 1 : 0) : uploadBatchIndex}
+              batchTotal={liveQueueItems.length ? liveTotals.total : uploadBatchTotal}
+              currentFileName={liveQueueItems.length ? liveCurrent?.fileName ?? null : uploadFileName}
+              currentFilePercent={
+                liveQueueItems.length
+                  ? liveCurrent
+                    ? liveQueueItems.find((i) => i.id === liveCurrent.id)?.progress ?? null
+                    : null
+                  : uploadCurrentFilePercent
+              }
+              onRetry={(id) => {
+                if (getLiveUploads().some((j) => j.id === id)) retryJob(id)
+                else retryUploadQueueItem(id)
+              }}
+              onRetryAll={retryAllFailed}
+              onPause={pauseJob}
+              onResume={resumeJob}
+              onCancel={(id) => void cancelJob(id)}
+              onReselect={attachFileForResume}
+              onDismiss={() => {
+                dismissFailed()
+                dismissFailedUploadQueue()
+              }}
             />
 
             {filesError ? (

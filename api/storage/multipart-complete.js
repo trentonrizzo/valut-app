@@ -1,4 +1,4 @@
-import { CompleteMultipartUploadCommand } from '@aws-sdk/client-s3'
+import { CompleteMultipartUploadCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { requireAuthenticatedUser } from '../_auth.js'
 import { readJsonBody, sendJson } from '../_json.js'
 import { getBucket, getR2Client } from './_s3.js'
@@ -9,15 +9,27 @@ function normalizeParts(parts) {
   const out = []
   for (const p of parts) {
     const n = Number(p?.PartNumber ?? p?.partNumber)
-    const etag = p?.ETag ?? p?.etag
+    let etag = p?.ETag ?? p?.etag
     if (!Number.isInteger(n) || n < 1 || typeof etag !== 'string' || !etag.trim()) return null
-    out.push({ PartNumber: n, ETag: etag.trim() })
+    etag = etag.trim()
+    if (etag.startsWith('W/')) etag = etag.slice(2).trim()
+    if (!etag.startsWith('"') && !etag.endsWith('"')) etag = `"${etag.replaceAll('"', '')}"`
+    out.push({ PartNumber: n, ETag: etag })
   }
   out.sort((a, b) => a.PartNumber - b.PartNumber)
   for (let i = 0; i < out.length; i++) {
     if (out[i].PartNumber !== i + 1) return null
   }
   return out
+}
+
+async function objectExists(key) {
+  try {
+    await getR2Client().send(new HeadObjectCommand({ Bucket: getBucket(), Key: key }))
+    return true
+  } catch {
+    return false
+  }
 }
 
 export default async function handler(req, res) {
@@ -40,14 +52,22 @@ export default async function handler(req, res) {
     }
     assertOwnKey(user.id, key)
 
-    await getR2Client().send(
-      new CompleteMultipartUploadCommand({
-        Bucket: getBucket(),
-        Key: key,
-        UploadId: uploadId,
-        MultipartUpload: { Parts: parts },
-      }),
-    )
+    try {
+      await getR2Client().send(
+        new CompleteMultipartUploadCommand({
+          Bucket: getBucket(),
+          Key: key,
+          UploadId: uploadId,
+          MultipartUpload: { Parts: parts },
+        }),
+      )
+    } catch (error) {
+      const already = await objectExists(key)
+      if (already) {
+        return sendJson(res, 200, { ok: true, key, alreadyComplete: true })
+      }
+      throw error
+    }
 
     return sendJson(res, 200, { ok: true, key })
   } catch (error) {
@@ -56,6 +76,7 @@ export default async function handler(req, res) {
     return sendJson(res, status, {
       ok: false,
       error: error instanceof Error ? error.message : 'Failed to complete multipart upload',
+      code: 'ERR_MULTIPART_COMPLETE',
     })
   }
 }
