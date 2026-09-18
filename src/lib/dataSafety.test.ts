@@ -52,4 +52,13 @@ describe('data-safety source contracts', () => {
     const src = readFileSync(join(root, 'src/pages/Dashboard.tsx'), 'utf8')
     expect(src).not.toMatch(/eq\('upload_status'/)
   })
+
+  it('app renders a boot screen instead of throwing on missing supabase env', () => {
+    const src = readFileSync(join(root, 'src/lib/supabase.ts'), 'utf8')
+    expect(src).not.toMatch(/if \(!url \|\| !anonKey\) \{\s*throw/)
+    expect(src).toContain('supabaseConfigError')
+    const app = readFileSync(join(root, 'src/App.tsx'), 'utf8')
+    expect(app).toContain('ErrorBoundary')
+    expect(app).toContain('BootScreen')
+  })
 })

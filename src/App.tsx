@@ -12,9 +12,23 @@ import { FullScreenMediaViewer } from './pages/FullScreenMediaViewer'
 import { Settings } from './pages/Settings'
 import { Upload } from './pages/Upload'
 import { Library } from './pages/Library'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import { BootScreen } from './components/BootScreen'
+import { supabaseConfigError } from './lib/supabase'
 
 export default function App() {
+  if (supabaseConfigError) {
+    return (
+      <BootScreen
+        title="Vault cannot start"
+        message={supabaseConfigError}
+        onRetry={() => window.location.reload()}
+      />
+    )
+  }
+
   return (
+    <ErrorBoundary>
     <AuthProvider>
       <VaultProvider>
       <ToastProvider>
@@ -46,5 +60,6 @@ export default function App() {
       </ToastProvider>
       </VaultProvider>
     </AuthProvider>
+    </ErrorBoundary>
   )
 }

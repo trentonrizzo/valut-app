@@ -1,11 +1,11 @@
 /* Basic offline shell + runtime cache for same-origin static assets */
-const CACHE = 'vault-static-v1'
+const CACHE = 'vault-static-v11'
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((cache) => cache.addAll(['/', '/manifest.json']).catch(() => {}))
+      .then((cache) => cache.addAll(['/manifest.json']).catch(() => {}))
       .then(() => self.skipWaiting()),
   )
 })
@@ -25,6 +25,21 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return
   if (url.pathname.startsWith('/api/')) return
 
+  const isDocument =
+    event.request.mode === 'navigate' ||
+    (event.request.headers.get('accept') || '').includes('text/html')
+
+  if (isDocument) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          return response
+        })
+        .catch(() => caches.match('/') || caches.match(event.request)),
+    )
+    return
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const network = fetch(event.request)
@@ -36,7 +51,7 @@ self.addEventListener('fetch', (event) => {
           return response
         })
         .catch(() => cached)
-      return cached || network
+      return network.catch(() => cached)
     }),
   )
 })
