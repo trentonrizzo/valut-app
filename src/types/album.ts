@@ -14,4 +14,5 @@ export type AlbumWithMeta = AlbumRow & {
   previewFileName: string | null
   /** File id for the preview asset (decrypt cache). */
   previewFileId: string | null
+  isProtected?: boolean
 }

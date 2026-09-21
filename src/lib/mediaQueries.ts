@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 import { isVideoFileName } from './mediaTypes'
 import type { FileRow, MediaFilters, MediaSort, PageCursor } from '../types/media'
 import { PAGE_SIZE } from '../types/media'
-import { isV11SchemaReady } from './schemaGuard'
+import { isV11SchemaReady, isV2SchemaReady } from './schemaGuard'
 
 function sanitizeSearch(raw: string): string {
   return raw.trim().replace(/[%(),]/g, ' ').replace(/\s+/g, ' ').slice(0, 80)
@@ -111,6 +111,7 @@ export async function listMediaPage(opts: {
 
   q = q.or('purpose.eq.content,purpose.is.null')
   if (v11) q = q.eq('upload_status', 'ready')
+  if (await isV2SchemaReady()) q = q.is('deleted_at', null)
   if (!v11 && f.albumId) q = q.eq('album_id', f.albumId)
 
   if (f.type === 'videos') {
@@ -207,6 +208,29 @@ export async function listMediaPage(opts: {
     if (col === 'captured_at') nextCursor.ts = last.captured_at
   }
   return { rows: page, nextCursor }
+}
+
+/** Page through matching ids only — never loads full library rows into memory. */
+export async function listAllMatchingFileIds(opts: {
+  userId: string
+  filters: MediaFilters
+  max?: number
+}): Promise<string[]> {
+  const ids: string[] = []
+  let cursor: PageCursor | null = null
+  const max = opts.max ?? 5000
+  while (ids.length < max) {
+    const page = await listMediaPage({
+      userId: opts.userId,
+      filters: opts.filters,
+      cursor,
+      limit: Math.min(100, max - ids.length),
+    })
+    for (const row of page.rows) ids.push(row.id)
+    if (!page.nextCursor || page.rows.length === 0) break
+    cursor = page.nextCursor
+  }
+  return ids
 }
 
 export async function countAlbumContent(userId: string, albumId: string): Promise<number> {

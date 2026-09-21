@@ -1,5 +1,6 @@
 import { apiSignedGet } from '../upload/storageApi'
 import { decryptChunk, CHUNK_PLAINTEXT_BYTES } from '../crypto/chunkCipher'
+import { toArrayBuffer } from '../crypto/bytes'
 import { unwrapDek, base64ToBytes } from '../crypto/envelope'
 import { importDek } from '../crypto/chunkCipher'
 import { setDecryptedBlobUrlForFile, getDecryptedBlobUrlForFile } from '../decryptedBlobCache'
@@ -58,7 +59,7 @@ async function decryptBufferAsChunks(
   let index = 0
   while (offset < buf.byteLength) {
     const slice = buf.subarray(offset, Math.min(buf.byteLength, offset + cipherChunk))
-    const plain = await decryptChunk(dek, fileNonce, index, slice)
+    const plain = await decryptChunk(dek, fileNonce, index, toArrayBuffer(slice))
     parts.push(new Blob([plain]))
     offset += cipherChunk
     index += 1

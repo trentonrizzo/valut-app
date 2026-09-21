@@ -120,14 +120,23 @@ export function normalizeFileName(name: string): string {
 }
 
 export function fileMatchesResume(
-  file: { name: string; size: number },
-  job: { fileName: string; size: number },
+  file: { name: string; size: number; lastModified?: number },
+  job: { fileName: string; size: number; lastModified?: number | null },
 ): { ok: true } | { ok: false; reason: string } {
   if (file.size !== job.size) {
     return { ok: false, reason: 'Selected file size does not match the paused upload.' }
   }
   if (normalizeFileName(file.name) !== normalizeFileName(job.fileName)) {
     return { ok: false, reason: 'Selected file name does not match the paused upload.' }
+  }
+  if (
+    job.lastModified != null &&
+    file.lastModified != null &&
+    job.lastModified > 0 &&
+    file.lastModified > 0 &&
+    job.lastModified !== file.lastModified
+  ) {
+    return { ok: false, reason: 'Selected file last-modified time does not match the paused upload.' }
   }
   return { ok: true }
 }
@@ -147,8 +156,20 @@ export function canCatalogReady(job: {
   r2Verified?: boolean
   verifiedSize?: number | null
   size: number
+  storedSize?: number | null
+  encryptionVersion?: number
+  chunkSize?: number | null
 }): boolean {
-  return Boolean(job.r2Verified && job.verifiedSize === job.size)
+  const expected =
+    job.storedSize != null && Number.isFinite(job.storedSize)
+      ? job.storedSize
+      : (job.encryptionVersion ?? 0) > 0
+        ? job.storedSize
+        : job.size
+  if ((job.encryptionVersion ?? 0) > 0 && (job.storedSize == null || !Number.isFinite(job.storedSize))) {
+    return false
+  }
+  return Boolean(job.r2Verified && job.verifiedSize === expected)
 }
 
 export function classifyUploadError(e: unknown, stage: string): UploadCodedError {

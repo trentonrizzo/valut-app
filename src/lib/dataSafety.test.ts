@@ -31,11 +31,13 @@ describe('data-safety source contracts', () => {
     expect(src).toContain('album_id is null')
   })
 
-  it('api/delete never deletes R2 objects', () => {
+  it('api/delete only deletes owned keys after an explicit permanent action', () => {
     const src = readFileSync(join(root, 'api/delete.js'), 'utf8')
-    expect(src).not.toContain('deleteFile')
-    expect(src).not.toContain('DeleteObject')
-    expect(src).toContain('Permanent original deletion is disabled')
+    expect(src).toContain("action === 'permanent'")
+    expect(src).toContain('userOwnsStorageKey')
+    expect(src).toContain('DeleteObjectCommand')
+    expect(src).toContain('R2 object still present after delete')
+    expect(src).toContain('empty-trash')
   })
 
   it('one-shot apply script is additive and count-guarded', () => {
@@ -49,9 +51,10 @@ describe('data-safety source contracts', () => {
   })
 
   it('album gallery hides non-ready uploads without dropping legacy rows', () => {
-    const src = readFileSync(join(root, 'src/pages/Dashboard.tsx'), 'utf8')
-    expect(src).toContain("upload_status.eq.ready,upload_status.is.null")
-    expect(src).not.toMatch(/eq\('upload_status',\s*'failed'/)
+    const src = readFileSync(join(root, 'src/lib/albumMembers.ts'), 'utf8')
+    expect(src).toContain("upload_status && f.upload_status !== 'ready'")
+    expect(src).toContain("purpose !== 'cover'")
+    expect(src).toContain("from('album_files')")
   })
 
   it('app renders a boot screen instead of throwing on missing supabase env', () => {

@@ -12,6 +12,10 @@ type Props = {
   onAddTags: () => void
   onRemoveTags: () => void
   onDownload: () => void
+  onDelete?: () => void
+  onLock?: () => void
+  onUnlock?: () => void
+  onSelectAllMatching?: () => void
 }
 
 export function BulkActionBar({
@@ -28,6 +32,10 @@ export function BulkActionBar({
   onAddTags,
   onRemoveTags,
   onDownload,
+  onDelete,
+  onLock,
+  onUnlock,
+  onSelectAllMatching,
 }: Props) {
   if (count === 0) return null
   return (
@@ -36,6 +44,11 @@ export function BulkActionBar({
       <button type="button" className="btn btn--ghost" onClick={onSelectAll}>
         Select visible
       </button>
+      {onSelectAllMatching ? (
+        <button type="button" className="btn btn--ghost" onClick={onSelectAllMatching}>
+          Select all matches
+        </button>
+      ) : null}
       <button type="button" className="btn btn--ghost" onClick={onClear}>
         Clear
       </button>
@@ -116,6 +129,21 @@ export function BulkActionBar({
       <button type="button" className="btn btn--ghost" onClick={onDownload}>
         Download
       </button>
+      {onLock ? (
+        <button type="button" className="btn btn--ghost" onClick={onLock}>
+          Lock
+        </button>
+      ) : null}
+      {onUnlock ? (
+        <button type="button" className="btn btn--ghost" onClick={onUnlock}>
+          Unlock
+        </button>
+      ) : null}
+      {onDelete ? (
+        <button type="button" className="btn btn--ghost" onClick={onDelete}>
+          Delete
+        </button>
+      ) : null}
     </div>
   )
 }

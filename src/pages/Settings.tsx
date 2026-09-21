@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useVault } from '../context/useVault'
 import { ConfirmLogoutModal } from '../components/ConfirmLogoutModal'
+import { clearVaultPin, setVaultPin, vaultPinIsSet, verifyVaultPin } from '../lib/vaultPin'
+import { Link } from 'react-router-dom'
 
 export function Settings() {
   const { user, signOut } = useAuth()
@@ -12,6 +14,12 @@ export function Settings() {
   const [recoveryInput, setRecoveryInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [pin, setPin] = useState('')
+  const [pinSet, setPinSet] = useState(false)
+
+  useEffect(() => {
+    void vaultPinIsSet().then(setPinSet).catch(() => setPinSet(false))
+  }, [])
 
   async function handleConfirmLogout() {
     setLogoutOpen(false)
@@ -103,6 +111,60 @@ export function Settings() {
               </>
             ) : null}
             {msg ? <p className="field-error">{msg}</p> : null}
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <h2 className="settings-section__heading">Vault PIN</h2>
+          <div className="settings-section__card">
+            <p className="settings-placeholder">
+              Optional session PIN for locked items. This is not encryption. Status: {pinSet ? 'set' : 'not set'}
+            </p>
+            <input className="field-input" type="password" placeholder="PIN (4+)" value={pin} onChange={(e) => setPin(e.target.value)} />
+            <button
+              type="button"
+              className="btn btn--outline btn--block"
+              onClick={async () => {
+                try {
+                  if (pinSet) {
+                    const ok = await verifyVaultPin(pin)
+                    setMsg(ok ? 'Session unlocked' : 'Wrong PIN')
+                  } else {
+                    await setVaultPin(pin)
+                    setPinSet(true)
+                    setMsg('PIN saved for this account')
+                  }
+                  setPin('')
+                } catch (e) {
+                  setMsg(e instanceof Error ? e.message : 'PIN failed')
+                }
+              }}
+            >
+              {pinSet ? 'Unlock session' : 'Set PIN'}
+            </button>
+            {pinSet ? (
+              <button
+                type="button"
+                className="btn btn--ghost btn--block"
+                onClick={async () => {
+                  await clearVaultPin()
+                  setPinSet(false)
+                  setMsg('PIN removed')
+                }}
+              >
+                Remove PIN
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <h2 className="settings-section__heading">Storage</h2>
+          <div className="settings-section__card">
+            <p className="settings-placeholder">Storage connection uses signed R2 URLs. Multipart verification uses server ListParts + HeadObject, so Safari ETag headers are not required.</p>
+            <Link className="btn btn--outline btn--block" to="/deleted">
+              Recently Deleted
+            </Link>
           </div>
         </section>
 

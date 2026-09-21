@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
-import { DEFAULT_MEDIA_FILTERS, type MediaFilters } from '../types/media'
+import { DEFAULT_MEDIA_FILTERS } from '../types/media'
 import type { FileRow } from '../types/media'
-import { listMediaPage } from '../lib/mediaQueries'
+import { listAllMatchingFileIds, listMediaPage } from '../lib/mediaQueries'
+import { softDeleteFiles } from '../lib/trash'
+import { setFilesLocked } from '../lib/locks'
+import { classifyFileKind } from '../lib/fileKind'
 import { fetchAlbumsWithCounts } from '../lib/albumQueries'
 import { listTags, addTagsToFiles, removeTagsFromFiles } from '../lib/tags'
 import { addFilesToAlbum, setFavorite, setRating } from '../lib/albumMembership'
@@ -32,8 +35,8 @@ import { FilterBar } from '../components/library/FilterBar'
 import { BulkActionBar } from '../components/library/BulkActionBar'
 import { TagPickerModal } from '../components/library/TagPickerModal'
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
-import { isVideoFileName } from '../lib/mediaTypes'
 import { UploadQueueOverlay } from '../components/UploadQueueOverlay'
+import { filesFromInput, logUploadSelection, selectionFailureReason } from '../lib/upload/selectFiles'
 
 export function Library() {
   const { user, session } = useAuth()
@@ -119,7 +122,9 @@ export function Library() {
         <div className="dashboard__toolbar">
           <div>
             <h1 className="dashboard__title">Library</h1>
-            <p className="dashboard__subtitle">All media · albums are organizational only</p>
+                <p className="dashboard__subtitle">
+              All media · <a href="/deleted">Recently Deleted</a>
+            </p>
           </div>
           <label className="btn btn--primary">
             Upload
@@ -129,9 +134,28 @@ export function Library() {
               multiple
               className="visually-hidden"
               onChange={(e) => {
-                const files = e.currentTarget.files ? Array.from(e.currentTarget.files) : []
+                const files = filesFromInput(e.currentTarget.files)
                 e.currentTarget.value = ''
-                if (files.length && user) void enqueueFiles(files, { albumId: null })
+                const reason = selectionFailureReason(files)
+                if (reason) {
+                  showToast(reason, 'error')
+                  alert(reason)
+                  return
+                }
+                if (!user) {
+                  showToast('Please sign in to upload.', 'error')
+                  return
+                }
+                logUploadSelection('library-input-confirmed', {
+                  count: files.length,
+                  names: files.map((f) => f.name),
+                  sizes: files.map((f) => f.size),
+                })
+                void enqueueFiles(files, { albumId: null }).catch((err) => {
+                  const msg = err instanceof Error ? err.message : 'Upload failed'
+                  showToast(msg, 'error')
+                  alert(msg)
+                })
               }}
             />
           </label>
@@ -142,10 +166,36 @@ export function Library() {
           albums={albums}
           onClear={() => setSelected(new Set())}
           onSelectAll={() => setSelected(new Set(rows.map((r) => r.id)))}
+          onSelectAllMatching={async () => {
+            if (!user) return
+            const ids = await listAllMatchingFileIds({ userId: user.id, filters })
+            setSelected(new Set(ids))
+            showToast(`Selected ${ids.length} matching items`)
+          }}
           onAddToAlbum={async (albumId) => {
             if (!user) return
             await addFilesToAlbum(user.id, albumId, [...selected])
             showToast('Added to album')
+          }}
+          onDelete={async () => {
+            if (!user || selected.size === 0) return
+            if (!window.confirm(`Move ${selected.size} item(s) to Recently Deleted?`)) return
+            await softDeleteFiles(user.id, [...selected])
+            setRows((prev) => prev.filter((r) => !selected.has(r.id)))
+            setSelected(new Set())
+            showToast('Moved to Recently Deleted')
+          }}
+          onLock={async () => {
+            if (!user) return
+            await setFilesLocked(user.id, [...selected], true)
+            setRows((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, locked: true } : r)))
+            showToast('Locked. Content stays hidden until you unlock with your Vault PIN this session.')
+          }}
+          onUnlock={async () => {
+            if (!user) return
+            await setFilesLocked(user.id, [...selected], false)
+            setRows((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, locked: false } : r)))
+            showToast('Unlocked')
           }}
           onFavorite={async (on) => {
             if (!user) return
@@ -168,9 +218,19 @@ export function Library() {
         ) : (
           <ul className="vault-grid vault-grid--gallery">
             {rows.map((f) => {
-              const isVideo = isVideoFileName(f.file_name) || Boolean(f.mime_type?.startsWith('video/'))
+              const kind = classifyFileKind({ name: f.file_name, mime_type: f.mime_type })
               return (
-                <li key={f.id} className={`vault-photo-item ${selected.has(f.id) ? 'is-selected' : ''}`}>
+                <li
+                  key={f.id}
+                  className={`vault-photo-item ${selected.has(f.id) ? 'is-selected' : ''}`}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    const next = new Set(selected)
+                    if (next.has(f.id)) next.delete(f.id)
+                    else next.add(f.id)
+                    setSelected(next)
+                  }}
+                >
                   <label className="vault-photo-item__check">
                     <input
                       type="checkbox"
@@ -189,9 +249,15 @@ export function Library() {
                     onClick={() => navigate(`/library/media/${f.id}`, { state: { filters } })}
                   >
                     <div className="vault-photo-tile__media">
-                      {user ? <VaultPhotoTileMedia file={f} userId={user.id} /> : null}
+                      {f.locked ? (
+                        <div className="file-kind-tile">Locked</div>
+                      ) : user && (kind === 'image' || kind === 'video') ? (
+                        <VaultPhotoTileMedia file={f} userId={user.id} />
+                      ) : (
+                        <div className="file-kind-tile">{kind.toUpperCase()}</div>
+                      )}
                     </div>
-                    {isVideo ? <span className="vault-photo-tile__video-glyph" aria-hidden>▶</span> : null}
+                    {kind === 'video' ? <span className="vault-photo-tile__video-glyph" aria-hidden /> : null}
                     {f.favorite ? <span className="vault-photo-tile__fav">★</span> : null}
                   </button>
                 </li>

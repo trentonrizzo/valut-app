@@ -56,6 +56,39 @@ export async function removeTagsFromFiles(userId: string, fileIds: string[], tag
   if (error) throw new Error(error.message)
 }
 
+export async function addTagsToAlbums(userId: string, albumIds: string[], tagIds: string[]) {
+  const rows = albumIds.flatMap((album_id) => tagIds.map((tag_id) => ({ album_id, tag_id, user_id: userId })))
+  if (rows.length === 0) return
+  const { error } = await supabase.from('album_tags').upsert(rows, { onConflict: 'album_id,tag_id' })
+  if (error) throw new Error(error.message)
+}
+
+export async function removeTagsFromAlbums(userId: string, albumIds: string[], tagIds: string[]) {
+  const { error } = await supabase
+    .from('album_tags')
+    .delete()
+    .eq('user_id', userId)
+    .in('album_id', albumIds)
+    .in('tag_id', tagIds)
+  if (error) throw new Error(error.message)
+}
+
+export async function tagsForAlbum(userId: string, albumId: string) {
+  const { data, error } = await supabase
+    .from('album_tags')
+    .select('tag_id, tags(id, name, name_normalized)')
+    .eq('user_id', userId)
+    .eq('album_id', albumId)
+  if (error) throw new Error(error.message)
+  return (data ?? [])
+    .map((r) => {
+      const t = r.tags as unknown
+      if (t && typeof t === 'object' && 'id' in t) return t as { id: string; name: string; name_normalized: string }
+      return null
+    })
+    .filter((t): t is { id: string; name: string; name_normalized: string } => t != null)
+}
+
 export async function tagsForFile(userId: string, fileId: string) {
   const { data, error } = await supabase
     .from('file_tags')

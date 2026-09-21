@@ -23,6 +23,7 @@ import {
 } from '../lib/upload/manager'
 import { liveToQueueItems } from '../lib/upload/queueUi'
 import { formatEta, formatSpeedBps } from '../lib/upload/strategy'
+import { filesFromInput, logUploadSelection, selectionFailureReason } from '../lib/upload/selectFiles'
 
 export function Upload() {
   const { user } = useAuth()
@@ -60,12 +61,38 @@ export function Upload() {
 
   const start = useCallback(
     (files: File[]) => {
-      if (!user) return
-      if (!albumId) {
-        showToast('Choose an album first.', 'error')
-        return
+      try {
+        if (!user) {
+          showToast('Please sign in to upload.', 'error')
+          return
+        }
+        if (!albumId) {
+          showToast('Choose an album first.', 'error')
+          return
+        }
+        const reason = selectionFailureReason(files)
+        if (reason) {
+          showToast(reason, 'error')
+          alert(reason)
+          return
+        }
+        logUploadSelection('upload-page-start', {
+          count: files.length,
+          names: files.map((f) => f.name),
+          sizes: files.map((f) => f.size),
+          types: files.map((f) => f.type || ''),
+          albumId,
+        })
+        void enqueueFiles(files, { albumId }).catch((e) => {
+          const msg = e instanceof Error ? e.message : 'Upload failed'
+          showToast(msg, 'error')
+          alert(msg)
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Upload could not start'
+        showToast(msg, 'error')
+        alert(msg)
       }
-      void enqueueFiles(files, { albumId }).catch((e) => showToast(e instanceof Error ? e.message : 'Upload failed', 'error'))
     },
     [user, albumId, showToast],
   )
@@ -102,9 +129,9 @@ export function Upload() {
               multiple
               disabled={!albumId}
               onChange={(e) => {
-                const files = e.currentTarget.files ? Array.from(e.currentTarget.files) : []
+                const files = filesFromInput(e.currentTarget.files)
                 e.currentTarget.value = ''
-                if (files.length) start(files)
+                start(files)
               }}
             />
           </label>

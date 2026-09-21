@@ -27,14 +27,14 @@ describe('unauthenticated upload URL', () => {
   })
 })
 
-describe('permanent original deletion is disabled', () => {
-  it('refuses authenticated delete requests without calling R2', async () => {
+describe('permanent delete ownership', () => {
+  it('rejects unauthenticated delete', async () => {
     vi.resetModules()
     const handler = (await import('../api/delete.js')).default
     const req = {
       method: 'POST',
-      headers: { authorization: 'Bearer not-a-real-jwt' },
-      body: { key: 'x', userId: 'y' },
+      headers: {},
+      body: { action: 'permanent', fileId: 'x' },
     }
     const res = {
       statusCode: 0,
@@ -45,8 +45,11 @@ describe('permanent original deletion is disabled', () => {
       body: '',
     }
     await handler(req, res)
-    expect([401, 403]).toContain(res.statusCode)
-    const parsed = JSON.parse(res.body)
-    expect(parsed.ok === false || parsed.error).toBeTruthy()
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('does not allow user A to target user B keys', () => {
+    expect(userOwnsStorageKey('user-a', 'users/user-b/originals/1')).toBe(false)
+    expect(userOwnsStorageKey('user-a', 'users/user-a/originals/1')).toBe(true)
   })
 })

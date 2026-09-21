@@ -12,4 +12,15 @@ export async function isV11SchemaReady(): Promise<boolean> {
 
 export function resetSchemaGuardCache(): void {
   cached = null
+  cachedV2 = null
+}
+
+let cachedV2: boolean | null = null
+
+/** True after V2 columns exist (files.deleted_at). */
+export async function isV2SchemaReady(): Promise<boolean> {
+  if (cachedV2 !== null) return cachedV2
+  const { error } = await supabase.from('files').select('deleted_at').limit(1)
+  cachedV2 = !error
+  return cachedV2
 }

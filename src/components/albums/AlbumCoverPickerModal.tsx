@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { uploadCoverAndSetAlbum } from '../../lib/batchUploadToAlbum'
+import { listAlbumCoverCandidates } from '../../lib/albumMembers'
 import { useDecryptedMediaSrc } from '../../hooks/useDecryptedMediaSrc'
 import { isVideoFileName } from '../../lib/mediaTypes'
 import type { AlbumWithMeta } from '../../types/album'
@@ -93,16 +94,16 @@ export function AlbumCoverPickerModal({ open, album, userId, onClose, onSaved, o
     let cancelled = false
     ;(async () => {
       try {
-        const { data, error: qErr } = await supabase
-          .from('files')
-          .select('id, file_name, file_url, created_at, purpose, is_encrypted')
-          .eq('album_id', album.id)
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-
-        if (qErr) throw new Error(qErr.message)
+        const members = await listAlbumCoverCandidates(userId, album.id)
         if (cancelled) return
-        const list = (data as FileRow[]) ?? []
+        const list = members.map((f) => ({
+          id: f.id,
+          file_name: f.file_name,
+          file_url: f.file_url,
+          created_at: f.created_at,
+          purpose: f.purpose,
+          is_encrypted: f.is_encrypted,
+        }))
         setFiles(list)
         setSelectedId(() => {
           const cov = album.cover_file_id

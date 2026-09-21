@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { toArrayBuffer } from './bytes'
 import {
   CHUNK_PLAINTEXT_BYTES,
   chunkCountForSize,
@@ -17,10 +18,10 @@ describe('chunked AES-GCM', () => {
     const nonce = newFileNonce()
     const a = new TextEncoder().encode('hello-chunk-0')
     const b = new TextEncoder().encode('hello-chunk-1')
-    const ca = await encryptChunk(dek, nonce, 0, a)
-    const cb = await encryptChunk(dek, nonce, 1, b)
-    const pa = new TextDecoder().decode(await decryptChunk(dek, nonce, 0, ca))
-    const pb = new TextDecoder().decode(await decryptChunk(dek, nonce, 1, cb))
+    const ca = await encryptChunk(dek, nonce, 0, toArrayBuffer(a))
+    const cb = await encryptChunk(dek, nonce, 1, toArrayBuffer(b))
+    const pa = new TextDecoder().decode(await decryptChunk(dek, nonce, 0, toArrayBuffer(ca)))
+    const pb = new TextDecoder().decode(await decryptChunk(dek, nonce, 1, toArrayBuffer(cb)))
     expect(pa).toBe('hello-chunk-0')
     expect(pb).toBe('hello-chunk-1')
   })
@@ -29,9 +30,9 @@ describe('chunked AES-GCM', () => {
     const dek = await generateDek()
     const nonce = newFileNonce()
     const plain = new Uint8Array([1, 2, 3, 4, 5])
-    const ct = await encryptChunk(dek, nonce, 0, plain)
+    const ct = await encryptChunk(dek, nonce, 0, toArrayBuffer(plain))
     ct[0] ^= 0xff
-    await expect(decryptChunk(dek, nonce, 0, ct)).rejects.toThrow()
+    await expect(decryptChunk(dek, nonce, 0, toArrayBuffer(ct))).rejects.toThrow()
   })
 
   it('does not reuse IVs across chunk indexes', () => {

@@ -11,13 +11,16 @@ export type RetryJob = {
   albumComplete?: boolean
   verifiedSize?: number | null
   size?: number
+  storedSize?: number | null
+  encryptionVersion?: number
+  chunkSize?: number | null
   uploadId?: string | null
   parts?: { done: boolean; etag?: string | null }[]
 }
 
 export function nextRetryScope(job: RetryJob, hasFile: boolean): RetryScope {
   if (job.dbComplete || job.state === 'complete') return 'done'
-  if (job.r2Verified && job.verifiedSize === job.size && !job.dbComplete) {
+  if (job.r2Verified && canCatalogReady({ ...job, size: job.size ?? 0 }) && !job.dbComplete) {
     return job.albumComplete === false ? 'album' : 'catalog'
   }
   if (job.r2Complete || job.multipartComplete) return 'verify'

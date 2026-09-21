@@ -24,6 +24,7 @@ export type PersistedUploadJob = {
   purpose: 'content' | 'cover'
   fileName: string
   size: number
+  storedSize?: number | null
   type: string
   objectId: string
   storageKey: string | null

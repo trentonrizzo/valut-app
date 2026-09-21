@@ -5,11 +5,14 @@ import { supabase } from '../lib/supabase'
 import { sortGalleryFiles, type FileSort } from '../lib/gallerySort'
 import { isVideoFileName } from '../lib/mediaTypes'
 import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
+import { isAlbumGalleryFile, listAlbumMemberFiles } from '../lib/albumMembers'
+import { classifyFileKind, fileKindLabel } from '../lib/fileKind'
+import { formatBytes } from '../lib/formatBytes'
 
 type FileRow = {
   id: string
   user_id: string
-  album_id: string
+  album_id: string | null
   file_name: string
   file_url: string
   created_at: string
@@ -18,11 +21,11 @@ type FileRow = {
   is_encrypted?: boolean | null
   mime_type?: string | null
   upload_status?: string | null
+  deleted_at?: string | null
 }
 
 function isGalleryFile(f: FileRow): boolean {
-  if (f.upload_status && f.upload_status !== 'ready') return false
-  return f.purpose !== 'cover'
+  return isAlbumGalleryFile(f)
 }
 
 function isVideo(fileName: string) {
@@ -183,16 +186,9 @@ export function FullScreenMediaViewer() {
     ;(async () => {
       try {
         if (albumId) {
-          const { data, error: qError } = await supabase
-            .from('files')
-            .select('*')
-            .eq('album_id', albumId)
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false })
-            .limit(80)
+          const page = await listAlbumMemberFiles(user.id, albumId, { offset: 0, limit: 80 })
           if (cancelled) return
-          if (qError) throw new Error(qError.message)
-          const rows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
+          const rows = page.rows.filter(isGalleryFile) as FileRow[]
           if (!rows.some((r) => r.id === fileId)) {
             const { data: one } = await supabase.from('files').select('*').eq('id', fileId).eq('user_id', user.id).maybeSingle()
             if (one) rows.unshift(one as FileRow)
@@ -484,7 +480,7 @@ export function FullScreenMediaViewer() {
             return (
               <div key={f.id} className="fs-media-viewer__slide" style={{ width: slideW > 0 ? slideW : '100%' }}>
                 {user && nearby ? (
-                  vid ? (
+                  classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'video' || vid ? (
                     <SlideVideo
                       file={f}
                       userId={user.id}
@@ -492,8 +488,17 @@ export function FullScreenMediaViewer() {
                       playbackRate={playbackRate}
                       loop={videoLoop}
                     />
-                  ) : (
+                  ) : classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'image' ? (
                     <SlideImage file={f} userId={user.id} />
+                  ) : classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'pdf' ? (
+                    <iframe className="fs-media-viewer__photo" title={f.file_name} src={f.file_url.startsWith('http') ? f.file_url : undefined} />
+                  ) : (
+                    <div className="fs-media-viewer__failed">
+                      <p>{fileKindLabel(classifyFileKind({ name: f.file_name, mime_type: f.mime_type }))}</p>
+                      <p>{f.file_name}</p>
+                      <p>{formatBytes(f.file_size_bytes ?? 0)}</p>
+                      <p>Use Download in the menu. Original is stored.</p>
+                    </div>
                   )
                 ) : null}
               </div>

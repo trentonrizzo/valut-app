@@ -4,6 +4,11 @@ import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
 import { buildAlbumsWithMeta, fetchAlbumsWithCounts } from '../lib/albumQueries'
+import { isAlbumGalleryFile, listAlbumMemberFiles } from '../lib/albumMembers'
+import { albumViewAllowed, clearAlbumPassword, setAlbumPassword, verifyAlbumPassword } from '../lib/albumPin'
+import { addFilesToAlbum, moveFilesToAlbum, removeFilesFromAlbum } from '../lib/albumMembership'
+import { softDeleteFiles } from '../lib/trash'
+import { BulkActionBar } from '../components/library/BulkActionBar'
 import { isV11SchemaReady } from '../lib/schemaGuard'
 import { formatBytes } from '../lib/formatBytes'
 import { isVideoFileName } from '../lib/mediaTypes'
@@ -16,6 +21,7 @@ import { AlbumCoverPickerModal } from '../components/albums/AlbumCoverPickerModa
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
 import { UploadQueueOverlay, type UploadQueueItem } from '../components/UploadQueueOverlay'
 import { batchUploadFilesToAlbum, validateUploadFileSizes } from '../lib/batchUploadToAlbum'
+import { filesFromInput, logUploadSelection, selectionFailureReason } from '../lib/upload/selectFiles'
 import {
   attachFileForResume,
   batchTotals,
@@ -81,6 +87,11 @@ export function Dashboard() {
   const [renameTarget, setRenameTarget] = useState<AlbumWithMeta | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<AlbumWithMeta | null>(null)
   const [coverPickerAlbum, setCoverPickerAlbum] = useState<AlbumWithMeta | null>(null)
+  const [protectTarget, setProtectTarget] = useState<AlbumWithMeta | null>(null)
+  const [protectPin, setProtectPin] = useState('')
+  const [unlockPin, setUnlockPin] = useState('')
+  const [albumUnlocked, setAlbumUnlocked] = useState(0)
+  const [albumSelected, setAlbumSelected] = useState<Set<string>>(new Set())
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set())
   const [creatingAlbum, setCreatingAlbum] = useState(false)
 
@@ -100,10 +111,8 @@ export function Dashboard() {
     poster_key?: string | null
   }
 
-  function isGalleryFile(f: FileRow): boolean {
-    const status = (f as FileRow & { upload_status?: string | null }).upload_status
-    if (status && status !== 'ready') return false
-    return f.purpose !== 'cover'
+  function isGalleryFile(f: { purpose?: string | null; upload_status?: string | null; deleted_at?: string | null }): boolean {
+    return isAlbumGalleryFile(f)
   }
 
   const [files, setFiles] = useState<FileRow[]>([])
@@ -293,16 +302,8 @@ export function Dashboard() {
 
       let serverRows: FileRow[] = []
       try {
-        const { data, error: selectError } = await supabase
-          .from('files')
-          .select('*')
-          .eq('album_id', openAlbumId)
-          .eq('user_id', user.id)
-          .or('upload_status.eq.ready,upload_status.is.null')
-          .order('created_at', { ascending: false })
-
-        if (selectError) throw new Error(selectError.message)
-        serverRows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
+        const page = await listAlbumMemberFiles(user.id, openAlbumId, { offset: 0, limit: 200 })
+        serverRows = page.rows.filter(isGalleryFile) as FileRow[]
       } catch (err) {
         const refreshMsg = err instanceof Error ? err.message : 'Could not refresh album'
         console.error(err)
@@ -470,6 +471,7 @@ export function Dashboard() {
   }, [albums, openAlbumId])
 
   const displayFiles = useMemo(() => sortGalleryFiles(files, fileSort), [files, fileSort])
+  void albumUnlocked
 
   useEffect(() => {
     setFileSort('newest')
@@ -512,20 +514,11 @@ export function Dashboard() {
 
     ;(async () => {
       try {
-        const { data, error } = await supabase
-          .from('files')
-          .select('*')
-          .eq('album_id', openAlbumId)
-          .eq('user_id', user.id)
-          .or('upload_status.eq.ready,upload_status.is.null')
-          .order('created_at', { ascending: false })
-          .limit(48)
-
-        if (error) throw new Error(error.message)
+        const page = await listAlbumMemberFiles(user.id, openAlbumId, { offset: 0, limit: 48 })
         if (!cancelled) {
-          const rows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
+          const rows = page.rows.filter(isGalleryFile) as FileRow[]
           setFiles(rows)
-          setFilesHasMore(((data as FileRow[]) ?? []).length >= 48)
+          setFilesHasMore(page.hasMore)
         }
       } catch (e) {
         if (cancelled) return
@@ -561,6 +554,7 @@ export function Dashboard() {
       previewFileId: null,
       order_index: nextOrder,
       cover_file_id: null,
+      is_protected: false,
     }
 
     setAlbums((prev) => [...prev, optimistic])
@@ -709,6 +703,10 @@ export function Dashboard() {
                 onRename={(a) => setRenameTarget(a)}
                 onDelete={(a) => setDeleteTarget(a)}
                 onSetCover={(a) => setCoverPickerAlbum(a)}
+                onProtect={(a) => {
+                  setProtectTarget(a)
+                  setProtectPin('')
+                }}
                 onCreateClick={() => setCreateModalOpen(true)}
                 onReorder={handleAlbumReorder}
               />
@@ -769,14 +767,29 @@ export function Dashboard() {
                   Upload
                   <input
                   type="file"
-                  accept="image/*,video/*,.mp4,.mov,.m4v,.qt,video/mp4,video/quicktime"
+                  accept="image/*,video/*,.mp4,.mov,.m4v,.qt,.MP4,.MOV,video/mp4,video/quicktime,*/*"
                   multiple
                   disabled={uploading || !openAlbumId}
                   onChange={(e) => {
                     const input = e.currentTarget
-                    const filesArray = input.files ? Array.from(input.files) : []
+                    let filesArray: File[] = []
+                    try {
+                      filesArray = filesFromInput(input.files)
+                    } catch (err) {
+                      input.value = ''
+                      const msg = err instanceof Error ? err.message : 'Could not read the selected file'
+                      showToast(msg, 'error')
+                      alert(msg)
+                      return
+                    }
                     input.value = ''
-                    if (filesArray.length === 0) return
+                    const emptyReason = selectionFailureReason(filesArray)
+                    if (emptyReason) {
+                      logUploadSelection('selection-empty', { reason: emptyReason })
+                      showToast(emptyReason, 'error')
+                      alert(emptyReason)
+                      return
+                    }
                     const albumIdForUpload = openAlbumId
                     if (!albumIdForUpload) {
                       showToast('Open an album first, then upload.', 'error')
@@ -791,12 +804,18 @@ export function Dashboard() {
                     }
                     if (!validateUploadFileSizes(filesArray)) return
 
-                    console.log('UPLOAD START', filesArray.length)
+                    logUploadSelection('album-input-confirmed', {
+                      count: filesArray.length,
+                      names: filesArray.map((f) => f.name),
+                      sizes: filesArray.map((f) => f.size),
+                      types: filesArray.map((f) => f.type || ''),
+                    })
 
                     const optimisticUrls: string[] = []
                     const queueIds: string[] = []
                     const optimisticRows: FileRow[] = filesArray.map((f) => {
-                      const url = URL.createObjectURL(f)
+                      const isVid = /\.(mp4|m4v|mov|webm|mkv|ogv|ogg|qt)$/i.test(f.name) || f.type.startsWith('video/')
+                      const url = isVid ? '' : URL.createObjectURL(f)
                       optimisticUrls.push(url)
                       const oid = `optimistic-${crypto.randomUUID()}`
                       queueIds.push(oid)
@@ -806,7 +825,7 @@ export function Dashboard() {
                         user_id: user.id,
                         album_id: albumIdForUpload,
                         file_name: f.name,
-                        file_url: url,
+                        file_url: url || 'pending://upload',
                         created_at: new Date().toISOString(),
                         file_size_bytes: f.size,
                         purpose: 'content',
@@ -817,6 +836,7 @@ export function Dashboard() {
                       return row
                     })
 
+                    try {
                     const queueItems: UploadQueueItem[] = queueIds.map((id, i) => ({
                       id,
                       name: filesArray[i]!.name,
@@ -838,11 +858,12 @@ export function Dashboard() {
                     setUploadCurrentFilePercent(0)
 
                     uploadLockRef.current = true
-                    requestAnimationFrame(() => {
-                      setTimeout(() => {
-                        void runAlbumUpload(filesArray, optimisticUrls, queueIds)
-                      }, 0)
-                    })
+                    void runAlbumUpload(filesArray, optimisticUrls, queueIds)
+                    } catch (err) {
+                      const msg = err instanceof Error ? err.message : 'Upload could not start after file selection'
+                      showToast(msg, 'error')
+                      alert(`Upload failed at selection: ${msg}`)
+                    }
                   }}
                 />
               </label>
@@ -885,6 +906,73 @@ export function Dashboard() {
               }}
             />
 
+            {openAlbum && !albumViewAllowed(openAlbum) ? (
+              <div className="vault-empty">
+                <p>This album is password-protected. Unlock it for this browser session.</p>
+                <input
+                  className="field-input"
+                  type="password"
+                  placeholder="Album PIN / password"
+                  value={unlockPin}
+                  onChange={(e) => setUnlockPin(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={async () => {
+                    const ok = await verifyAlbumPassword(openAlbum.id, unlockPin)
+                    if (!ok) {
+                      showToast('Wrong PIN', 'error')
+                      return
+                    }
+                    setUnlockPin('')
+                    setAlbumUnlocked((n) => n + 1)
+                    showToast('Album unlocked for this session')
+                  }}
+                >
+                  Unlock album
+                </button>
+              </div>
+            ) : (
+            <>
+            <BulkActionBar
+              count={albumSelected.size}
+              albums={albums.map((a) => ({ id: a.id, name: a.name }))}
+              currentAlbumId={openAlbumId}
+              onClear={() => setAlbumSelected(new Set())}
+              onSelectAll={() => setAlbumSelected(new Set(files.map((f) => f.id)))}
+              onAddToAlbum={async (dest) => {
+                if (!user) return
+                await addFilesToAlbum(user.id, dest, [...albumSelected])
+                showToast('Added to album (original stays in this album too)')
+              }}
+              onMoveToAlbum={async (dest) => {
+                if (!user || !openAlbumId) return
+                await moveFilesToAlbum(user.id, openAlbumId, dest, [...albumSelected])
+                setFiles((prev) => prev.filter((f) => !albumSelected.has(f.id)))
+                setAlbumSelected(new Set())
+                showToast('Moved')
+              }}
+              onRemoveFromAlbum={async () => {
+                if (!user || !openAlbumId) return
+                await removeFilesFromAlbum(user.id, openAlbumId, [...albumSelected])
+                setFiles((prev) => prev.filter((f) => !albumSelected.has(f.id)))
+                setAlbumSelected(new Set())
+                showToast('Removed from album')
+              }}
+              onFavorite={() => {}}
+              onAddTags={() => showToast('Tag from Library')}
+              onRemoveTags={() => {}}
+              onDownload={() => {}}
+              onDelete={async () => {
+                if (!user || albumSelected.size === 0) return
+                if (!window.confirm(`Move ${albumSelected.size} item(s) to Recently Deleted?`)) return
+                await softDeleteFiles(user.id, [...albumSelected])
+                setFiles((prev) => prev.filter((f) => !albumSelected.has(f.id)))
+                setAlbumSelected(new Set())
+                showToast('Moved to Recently Deleted')
+              }}
+            />
             {filesError ? (
             <div className="banner banner--error" role="alert">
               <strong>Could not load files.</strong> {filesError}
@@ -917,7 +1005,29 @@ export function Dashboard() {
                 const isVideo = isVideoFileName(f.file_name)
 
                 return (
-                  <li key={f.id} className="vault-photo-item">
+                  <li
+                    key={f.id}
+                    className={`vault-photo-item ${albumSelected.has(f.id) ? 'is-selected' : ''}`}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      const next = new Set(albumSelected)
+                      if (next.has(f.id)) next.delete(f.id)
+                      else next.add(f.id)
+                      setAlbumSelected(next)
+                    }}
+                  >
+                    <label className="vault-photo-item__check">
+                      <input
+                        type="checkbox"
+                        checked={albumSelected.has(f.id)}
+                        onChange={() => {
+                          const next = new Set(albumSelected)
+                          if (next.has(f.id)) next.delete(f.id)
+                          else next.add(f.id)
+                          setAlbumSelected(next)
+                        }}
+                      />
+                    </label>
                     <button
                       type="button"
                       className="vault-photo-tile"
@@ -987,18 +1097,13 @@ export function Dashboard() {
                     if (!user || !openAlbumId) return
                     setFilesLoading(true)
                     try {
-                      const { data, error } = await supabase
-                        .from('files')
-                        .select('*')
-                        .eq('album_id', openAlbumId)
-                        .eq('user_id', user.id)
-                        .or('upload_status.eq.ready,upload_status.is.null')
-                        .order('created_at', { ascending: false })
-                        .range(files.length, files.length + 47)
-                      if (error) throw new Error(error.message)
-                      const rows = ((data as FileRow[]) ?? []).filter(isGalleryFile)
+                      const page = await listAlbumMemberFiles(user.id, openAlbumId, {
+                        offset: files.length,
+                        limit: 48,
+                      })
+                      const rows = page.rows.filter(isGalleryFile) as FileRow[]
                       setFiles((prev) => [...prev, ...rows.filter((r) => !prev.some((p) => p.id === r.id))])
-                      setFilesHasMore(((data as FileRow[]) ?? []).length >= 48)
+                      setFilesHasMore(page.hasMore)
                     } catch (e) {
                       showToast(e instanceof Error ? e.message : 'Could not load more', 'error')
                     } finally {
@@ -1010,6 +1115,8 @@ export function Dashboard() {
                 </button>
               </div>
             ) : null}
+            </>
+            )}
             </>
             )}
 
@@ -1160,6 +1267,55 @@ export function Dashboard() {
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
       />
+
+      {protectTarget ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setProtectTarget(null)}>
+          <div className="modal modal--enter" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal__title">Album password / PIN</h2>
+            <p className="dashboard__subtitle">Optional. Leave empty and remove to keep the album as it is today.</p>
+            <input
+              className="field-input"
+              type="password"
+              placeholder="New PIN (4+ characters)"
+              value={protectPin}
+              onChange={(e) => setProtectPin(e.target.value)}
+            />
+            <div className="modal__actions">
+              <button type="button" className="btn btn--ghost" onClick={() => setProtectTarget(null)}>
+                Cancel
+              </button>
+              {protectTarget.is_protected || protectTarget.isProtected ? (
+                <button
+                  type="button"
+                  className="btn btn--outline"
+                  onClick={async () => {
+                    await clearAlbumPassword(protectTarget.id)
+                    setProtectTarget(null)
+                    await refreshAlbums()
+                    showToast('Album protection removed')
+                  }}
+                >
+                  Remove protection
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={protectPin.trim().length < 4}
+                onClick={async () => {
+                  await setAlbumPassword(protectTarget.id, protectPin)
+                  setProtectTarget(null)
+                  setProtectPin('')
+                  await refreshAlbums()
+                  showToast('Album protection saved')
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <AlbumCoverPickerModal
         open={coverPickerAlbum !== null}

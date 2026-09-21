@@ -51,6 +51,17 @@ describe('small MP4 success path', () => {
   })
 })
 
+describe('metadata extraction never blocks upload', () => {
+  it('extractMediaMetadata swallows failures and manager catalogs after verify only', () => {
+    const src = readFileSync(join(root, 'lib/upload/extractMetadata.ts'), 'utf8')
+    expect(src).toContain('catch')
+    expect(src).toContain('return base')
+    const manager = readFileSync(join(root, 'lib/upload/manager.ts'), 'utf8')
+    expect(manager).toContain('metadata-failed')
+    expect(manager).toContain('expectedVerifySize')
+  })
+})
+
 describe('MOV / video MIME handling', () => {
   it('accepts iPhone QuickTime MIME and .MOV names', () => {
     expect(normalizeUploadMime({ name: 'IMG_0099.MOV', type: '' })).toBe('video/quicktime')

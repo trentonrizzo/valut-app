@@ -39,6 +39,7 @@ export interface Database {
           created_at: string
           order_index: number
           cover_file_id: string | null
+          is_protected: boolean
         }
         Insert: {
           id?: string
@@ -47,6 +48,7 @@ export interface Database {
           created_at?: string
           order_index?: number
           cover_file_id?: string | null
+          is_protected?: boolean
         }
         Update: {
           id?: string
@@ -55,6 +57,7 @@ export interface Database {
           created_at?: string
           order_index?: number
           cover_file_id?: string | null
+          is_protected?: boolean
         }
         Relationships: [
           {
@@ -94,6 +97,11 @@ export interface Database {
           wrapped_dek: string | null
           encryption_chunk_size: number | null
           metadata_json: Record<string, unknown>
+          deleted_at: string | null
+          locked: boolean
+          stored_size_bytes: number | null
+          storage_integrity: string | null
+          membership_snapshot: unknown
         }
         Insert: {
           id?: string
@@ -122,6 +130,11 @@ export interface Database {
           wrapped_dek?: string | null
           encryption_chunk_size?: number | null
           metadata_json?: Record<string, unknown>
+          deleted_at?: string | null
+          locked?: boolean
+          stored_size_bytes?: number | null
+          storage_integrity?: string | null
+          membership_snapshot?: unknown
         }
         Update: {
           id?: string
@@ -150,6 +163,11 @@ export interface Database {
           wrapped_dek?: string | null
           encryption_chunk_size?: number | null
           metadata_json?: Record<string, unknown>
+          deleted_at?: string | null
+          locked?: boolean
+          stored_size_bytes?: number | null
+          storage_integrity?: string | null
+          membership_snapshot?: unknown
         }
         Relationships: [
           {
@@ -174,18 +192,21 @@ export interface Database {
           file_id: string
           user_id: string
           added_at: string
+          sort_index: number
         }
         Insert: {
           album_id: string
           file_id: string
           user_id: string
           added_at?: string
+          sort_index?: number
         }
         Update: {
           album_id?: string
           file_id?: string
           user_id?: string
           added_at?: string
+          sort_index?: number
         }
         Relationships: []
       }
@@ -270,6 +291,57 @@ export interface Database {
         }
         Relationships: []
       }
+      album_tags: {
+        Row: {
+          album_id: string
+          tag_id: string
+          user_id: string
+          created_at: string
+        }
+        Insert: {
+          album_id: string
+          tag_id: string
+          user_id: string
+          created_at?: string
+        }
+        Update: {
+          album_id?: string
+          tag_id?: string
+          user_id?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      editor_projects: {
+        Row: {
+          id: string
+          user_id: string
+          title: string
+          kind: string
+          payload: Record<string, unknown>
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          title?: string
+          kind?: string
+          payload?: Record<string, unknown>
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          title?: string
+          kind?: string
+          payload?: Record<string, unknown>
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       items: {
         Row: {
           id: string
@@ -312,6 +384,38 @@ export interface Database {
       album_content_stats: {
         Args: Record<string, never>
         Returns: { album_id: string; item_count: number; total_bytes: number }[]
+      }
+      album_ids_with_all_tags: {
+        Args: { p_tag_ids: string[] }
+        Returns: { album_id: string }[]
+      }
+      set_album_password: {
+        Args: { p_album_id: string; p_password: string }
+        Returns: boolean
+      }
+      verify_album_password: {
+        Args: { p_album_id: string; p_password: string }
+        Returns: boolean
+      }
+      clear_album_password: {
+        Args: { p_album_id: string }
+        Returns: boolean
+      }
+      set_vault_pin: {
+        Args: { p_pin: string }
+        Returns: boolean
+      }
+      verify_vault_pin: {
+        Args: { p_pin: string }
+        Returns: boolean
+      }
+      vault_pin_is_set: {
+        Args: Record<string, never>
+        Returns: boolean
+      }
+      clear_vault_pin: {
+        Args: Record<string, never>
+        Returns: boolean
       }
     }
     Enums: Record<string, never>

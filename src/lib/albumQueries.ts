@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import { isVideoFileName } from './mediaTypes'
 import type { AlbumRow, AlbumWithMeta } from '../types/album'
 import type { FileRow } from '../types/media'
+import { albumViewAllowed } from './albumPin'
 
 export type FileRowForAlbumMeta = {
   id: string
@@ -100,11 +101,13 @@ export async function fetchAlbumsWithCounts(userId: string) {
     const st = byAlbum.get(album.id)
     const cover = album.cover_file_id ? coverMap.get(album.cover_file_id) : undefined
     const file = cover ?? fallback.get(album.id) ?? null
+    const reveal = albumViewAllowed(album)
     return {
       ...album,
+      isProtected: album.is_protected === true,
       itemCount: st?.item_count ?? 0,
       totalBytes: st?.total_bytes ?? 0,
-      ...metaFromFile(file),
+      ...metaFromFile(reveal ? file : null),
     }
   })
 

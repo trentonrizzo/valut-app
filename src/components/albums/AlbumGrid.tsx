@@ -29,6 +29,7 @@ type Props = {
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
   onSetCover?: (album: AlbumWithMeta) => void
+  onProtect?: (album: AlbumWithMeta) => void
   onCreateClick: () => void
   onReorder: (next: AlbumWithMeta[]) => void
 }
@@ -42,6 +43,7 @@ function SortableAlbumItem({
   onRename,
   onDelete,
   onSetCover,
+  onProtect,
 }: {
   album: AlbumWithMeta
   userId: string
@@ -51,6 +53,7 @@ function SortableAlbumItem({
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
   onSetCover?: (album: AlbumWithMeta) => void
+  onProtect?: (album: AlbumWithMeta) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: album.id,
@@ -74,6 +77,7 @@ function SortableAlbumItem({
         onRename={onRename}
         onDelete={onDelete}
         onSetCover={onSetCover}
+        onProtect={onProtect}
         dragHandle={
           <button
             type="button"
@@ -107,6 +111,7 @@ export function AlbumGrid({
   onRename,
   onDelete,
   onSetCover,
+  onProtect,
   onCreateClick,
   onReorder,
 }: Props) {
@@ -182,6 +187,7 @@ export function AlbumGrid({
                 onRename={onRename}
                 onDelete={onDelete}
                 onSetCover={onSetCover}
+                onProtect={onProtect}
               />
             ))}
           </ul>

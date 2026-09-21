@@ -46,6 +46,20 @@ export function BottomNav() {
         </NavLink>
 
         <NavLink
+          to="/editor"
+          className={({ isActive }) => `bottom-nav__link ${isActive ? 'is-active' : ''}`}
+        >
+          <span className="bottom-nav__icon" aria-hidden>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+              <rect x="3" y="5" width="8" height="14" rx="1.2" />
+              <rect x="13" y="5" width="8" height="6" rx="1.2" />
+              <rect x="13" y="13" width="8" height="6" rx="1.2" />
+            </svg>
+          </span>
+          <span className="bottom-nav__label">Editor</span>
+        </NavLink>
+
+        <NavLink
           to="/settings"
           className={({ isActive }) => `bottom-nav__link ${isActive ? 'is-active' : ''}`}
         >

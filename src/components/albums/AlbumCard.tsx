@@ -22,6 +22,7 @@ type Props = {
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
   onSetCover?: (album: AlbumWithMeta) => void
+  onProtect?: (album: AlbumWithMeta) => void
 }
 
 export function AlbumCard({
@@ -34,6 +35,7 @@ export function AlbumCard({
   onRename,
   onDelete,
   onSetCover,
+  onProtect,
 }: Props) {
   const { displayUrl: previewSrc, failed: previewFailed } = useDecryptedMediaSrc(
     album.previewUrl,
@@ -70,15 +72,7 @@ export function AlbumCard({
         {album.previewUrl && previewSrc ? (
           <div className="album-card__thumb-inner album-card__thumb-inner--media">
             {album.previewIsVideo ? (
-              <>
-                <AlbumCardCoverVideo src={previewSrc} className="album-card__thumb-img" />
-                <span className="album-card__video-badge" aria-hidden>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M8 5v14l11-7L8 5z" />
-                  </svg>
-                  Video
-                </span>
-              </>
+              <AlbumCardCoverVideo src={previewSrc} className="album-card__thumb-img" />
             ) : (
               <img className="album-card__thumb-img" src={previewSrc} alt="" loading="lazy" />
             )}
@@ -114,6 +108,7 @@ export function AlbumCard({
           disabled={busy}
           onRename={() => onRename(album)}
           onSetCover={onSetCover ? () => onSetCover(album) : undefined}
+          onProtect={onProtect ? () => onProtect(album) : undefined}
           onDelete={() => onDelete(album)}
         />
       </div>

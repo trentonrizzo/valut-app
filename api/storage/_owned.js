@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { getSupabaseServerEnv } from '../_env.js'
 
 const FULL_SELECT =
-  'id, user_id, file_url, storage_key, encryption_version, wrapped_dek, encryption_chunk_size, metadata_json, mime_type, file_name, thumbnail_key, poster_key, is_encrypted'
+  'id, user_id, file_url, storage_key, encryption_version, wrapped_dek, encryption_chunk_size, metadata_json, mime_type, file_name, thumbnail_key, poster_key, is_encrypted, stored_size_bytes, deleted_at'
 
 const LEGACY_SELECT = 'id, user_id, file_url, mime_type, file_name, is_encrypted'
 

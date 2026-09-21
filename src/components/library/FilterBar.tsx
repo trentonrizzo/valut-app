@@ -26,7 +26,7 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
   const set = (patch: Partial<MediaFilters>) => onChange({ ...filters, ...patch })
 
   return (
-    <div className="filter-bar">
+    <div className="filter-bar filter-bar--sheet">
       <input
         className="field-input filter-bar__search"
         placeholder="Search filename or tags"

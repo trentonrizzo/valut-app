@@ -11,6 +11,7 @@ import {
   importDek,
 } from '../crypto/chunkCipher'
 import { wrapDek, unwrapDek, bytesToBase64, base64ToBytes } from '../crypto/envelope'
+import { toArrayBuffer } from '../crypto/bytes'
 import {
   createAuthFetch,
   apiPutUrl,
@@ -40,6 +41,8 @@ import {
   uniqueOriginalKey,
 } from './strategy'
 import { reconcilePersistedJob, shouldSkipByteUpload } from './finalizePolicy'
+import { expectedVerifySize, storedObjectBytes } from './storedSize'
+import { inspectSelectedFile, logUploadSelection } from './selectFiles'
 
 export type LiveUploadItem = PersistedUploadJob & {
   speedBps: number
@@ -151,14 +154,31 @@ export async function enqueueFiles(files: File[], opts: { albumId: string | null
     const id = crypto.randomUUID()
     ids.push(id)
     const objectId = id
-    const mime = normalizeUploadMime(file)
+    const inspected = inspectSelectedFile(file)
+    const mime = inspected.type
     const plan = planUpload(file.size)
+    const encrypted = Boolean(masterKey)
+    const storedSize = storedObjectBytes(file.size, encrypted, plan.partSize || CHUNK_PLAINTEXT_BYTES)
+    logUploadSelection('enqueue', {
+      name: inspected.name,
+      size: inspected.size,
+      type: inspected.type,
+      extension: inspected.extension,
+      lastModified: inspected.lastModified,
+      albumId: opts.albumId,
+      purpose,
+      strategy: plan.useMultipart ? 'multipart' : 'simple',
+      partCount: plan.parts.length,
+      encrypted,
+      storedSize,
+    })
     const job: PersistedUploadJob = {
       id,
       albumId: opts.albumId,
       purpose,
       fileName: file.name,
       size: file.size,
+      storedSize,
       type: mime,
       objectId,
       storageKey: uniqueOriginalKey(userId, objectId),
@@ -359,17 +379,31 @@ async function runJob(id: string) {
   await persist(job)
 
   try {
-    if (file && (job.width == null || job.durationMs == null || !job.type)) {
-      const meta = await extractMediaMetadata(file)
-      job = {
-        ...job,
-        width: job.width ?? meta.width,
-        height: job.height ?? meta.height,
-        durationMs: job.durationMs ?? meta.durationMs,
-        capturedAt: job.capturedAt ?? meta.capturedAt,
-        type: normalizeUploadMime(file) || meta.mime || job.type,
+    if (file) {
+      try {
+        const meta = await extractMediaMetadata(file)
+        logUploadSelection('metadata', {
+          name: file.name,
+          width: meta.width,
+          height: meta.height,
+          durationMs: meta.durationMs,
+          mime: meta.mime,
+        })
+        job = {
+          ...job,
+          width: job.width ?? meta.width,
+          height: job.height ?? meta.height,
+          durationMs: job.durationMs ?? meta.durationMs,
+          capturedAt: job.capturedAt ?? meta.capturedAt,
+          type: normalizeUploadMime(file) || meta.mime || job.type,
+        }
+        await persist(job)
+      } catch (metaErr) {
+        logUploadSelection('metadata-failed', {
+          name: file.name,
+          error: metaErr instanceof Error ? metaErr.message : String(metaErr),
+        })
       }
-      await persist(job)
     }
 
     let dek: CryptoKey | null = null
@@ -389,15 +423,22 @@ async function runJob(id: string) {
           job.wrappedDek = await wrapDek(masterKey, raw)
           fileNonce = newFileNonce()
           job.fileNonceB64 = bytesToBase64(fileNonce)
+          job.storedSize = storedObjectBytes(job.size, true, job.chunkSize || CHUNK_PLAINTEXT_BYTES)
           await persist(job)
         }
       } else {
-        job = { ...job, encryptionVersion: 0, wrappedDek: null, fileNonceB64: null }
+        job = { ...job, encryptionVersion: 0, wrappedDek: null, fileNonceB64: null, storedSize: job.size }
       }
 
       if (!file) throw codedError('ERR_NEEDS_FILE', 'File handle lost before bytes were stored.')
 
       const useMultipart = planUpload(file.size).useMultipart
+      logUploadSelection('upload-start', {
+        name: file.name,
+        size: file.size,
+        strategy: useMultipart ? 'multipart' : 'simple',
+        storedSize: expectedVerifySize(job),
+      })
       job = { ...job, state: 'uploading' }
       await persist(job)
 
@@ -510,6 +551,7 @@ async function finalizeCatalog(
     file_name: job.fileName,
     file_url: `r2://${job.storageKey}`,
     file_size_bytes: job.size,
+    stored_size_bytes: expectedVerifySize(job),
     purpose: job.purpose,
     is_encrypted: job.encryptionVersion > 0,
     mime_type: job.type,
@@ -566,13 +608,15 @@ async function assembleAndVerify(
   authFetch: ReturnType<typeof createAuthFetch>,
 ): Promise<PersistedUploadJob> {
   let job = initial
-  if (job.r2Verified && job.verifiedSize === job.size) return job
+  if (job.r2Verified && job.verifiedSize === expectedVerifySize(job)) return job
 
   if (job.uploadId && job.storageKey && !job.multipartComplete) {
+    const key = job.storageKey
+    const uploadId = job.uploadId
     try {
       job = { ...job, lastStage: 'part-list' }
       await persist(job)
-      const listed = await apiMultipartListParts(authFetch, { key: job.storageKey, uploadId: job.uploadId })
+      const listed = await apiMultipartListParts(authFetch, { key, uploadId })
       if (!listed.parts.length) {
         throw codedError('ERR_MULTIPART_PARTS', 'R2 has no uploaded parts for this multipart session.')
       }
@@ -590,9 +634,9 @@ async function assembleAndVerify(
       job = { ...job, parts, lastStage: 'multipart-complete' }
       await persist(job)
       const complete = await apiMultipartComplete(authFetch, {
-        key: job.storageKey,
-        uploadId: job.uploadId,
-        expectedSize: job.size,
+        key,
+        uploadId,
+        expectedSize: expectedVerifySize(job),
         parts: parts.map((p) => ({ PartNumber: p.partNumber, ETag: p.etag as string })),
       })
       job = {
@@ -605,8 +649,11 @@ async function assembleAndVerify(
       await persist(job)
     } catch (e) {
       try {
-        const recovered = await apiVerifyObject(authFetch, { key: job.storageKey, expectedSize: job.size })
-        if (recovered.verified && recovered.contentLength === job.size) {
+        const recovered = await apiVerifyObject(authFetch, {
+          key,
+          expectedSize: expectedVerifySize(job),
+        })
+        if (recovered.verified && recovered.contentLength === expectedVerifySize(job)) {
           job = {
             ...job,
             multipartComplete: true,
@@ -626,11 +673,13 @@ async function assembleAndVerify(
   }
 
   if (!job.storageKey) throw codedError('ERR_R2_VERIFY', 'Missing storage key')
+  const verifyKey = job.storageKey
   job = { ...job, lastStage: 'r2_verifying' }
   await persist(job)
-  const verified = await apiVerifyObject(authFetch, { key: job.storageKey, expectedSize: job.size })
-  if (!verified.verified || verified.contentLength !== job.size) {
-    throw codedError('ERR_R2_SIZE', `R2 size ${verified.contentLength} != ${job.size}`)
+  const expected = expectedVerifySize(job)
+  const verified = await apiVerifyObject(authFetch, { key: verifyKey, expectedSize: expected })
+  if (!verified.verified || verified.contentLength !== expected) {
+    throw codedError('ERR_R2_SIZE', `R2 size ${verified.contentLength} != stored ${expected} (plaintext ${job.size})`)
   }
   job = {
     ...job,
@@ -655,7 +704,7 @@ async function buildChunkBlob(
   const plain = await readFileSlice(file, start, end)
   if (dek && fileNonce) {
     const ct = await encryptChunk(dek, fileNonce, index, plain)
-    return new Blob([ct], { type: 'application/octet-stream' })
+    return new Blob([toArrayBuffer(ct)], { type: 'application/octet-stream' })
   }
   return new Blob([plain], { type: 'application/octet-stream' })
 }

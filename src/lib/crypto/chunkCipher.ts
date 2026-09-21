@@ -1,5 +1,7 @@
 /** Chunked AES-256-GCM for vault originals. Never whole-file arrayBuffer. */
 
+import { toArrayBuffer } from './bytes'
+
 export const ENCRYPTION_VERSION = 1
 export const CHUNK_PLAINTEXT_BYTES = 8 * 1024 * 1024
 export const GCM_TAG_BYTES = 16
@@ -21,9 +23,9 @@ export function ivForChunk(fileNonce: Uint8Array, chunkIndex: number): Uint8Arra
   if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
     throw new Error('chunkIndex must be a non-negative integer')
   }
-  const iv = new Uint8Array(12)
+  const iv = new Uint8Array(new ArrayBuffer(12))
   iv.set(fileNonce, 0)
-  const view = new DataView(iv.buffer, iv.byteOffset, iv.byteLength)
+  const view = new DataView(iv.buffer, 0, 12)
   view.setUint32(8, chunkIndex, false)
   return iv
 }
@@ -34,8 +36,9 @@ export async function encryptChunk(
   chunkIndex: number,
   plaintext: BufferSource,
 ): Promise<Uint8Array> {
-  const iv = ivForChunk(fileNonce, chunkIndex)
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, dek, plaintext)
+  const iv = toArrayBuffer(ivForChunk(fileNonce, chunkIndex))
+  const data = plaintext instanceof Uint8Array ? toArrayBuffer(plaintext) : plaintext
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, dek, data)
   return new Uint8Array(ct)
 }
 
@@ -45,8 +48,9 @@ export async function decryptChunk(
   chunkIndex: number,
   ciphertext: BufferSource,
 ): Promise<ArrayBuffer> {
-  const iv = ivForChunk(fileNonce, chunkIndex)
-  return crypto.subtle.decrypt({ name: 'AES-GCM', iv }, dek, ciphertext)
+  const iv = toArrayBuffer(ivForChunk(fileNonce, chunkIndex))
+  const data = ciphertext instanceof Uint8Array ? toArrayBuffer(ciphertext) : ciphertext
+  return crypto.subtle.decrypt({ name: 'AES-GCM', iv }, dek, data)
 }
 
 export async function generateDek(): Promise<CryptoKey> {
@@ -57,8 +61,9 @@ export async function exportRawKey(key: CryptoKey): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.exportKey('raw', key))
 }
 
-export async function importDek(raw: BufferSource): Promise<CryptoKey> {
-  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
+export async function importDek(raw: BufferSource | Uint8Array): Promise<CryptoKey> {
+  const key = raw instanceof Uint8Array ? toArrayBuffer(raw) : raw
+  return crypto.subtle.importKey('raw', key, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
 }
 
 export function newFileNonce(): Uint8Array {

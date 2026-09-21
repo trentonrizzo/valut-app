@@ -1,5 +1,6 @@
 import { supabase } from '../supabase'
 import { base64ToBytes, bytesToBase64 } from './envelope'
+import { toArrayBuffer } from './bytes'
 
 const IDB_NAME = 'vault-v11'
 const IDB_STORE = 'keys'
@@ -65,17 +66,18 @@ export function parseRecoverySecret(input: string): Uint8Array {
   return out
 }
 
-async function importMasterKey(raw: BufferSource, extractable: boolean): Promise<CryptoKey> {
-  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM', length: 256 }, extractable, [
+async function importMasterKey(raw: BufferSource | Uint8Array, extractable: boolean): Promise<CryptoKey> {
+  const key = raw instanceof Uint8Array ? toArrayBuffer(raw) : raw
+  return crypto.subtle.importKey('raw', key, { name: 'AES-GCM', length: 256 }, extractable, [
     'encrypt',
     'decrypt',
   ])
 }
 
 async function deriveWrapKey(secret: Uint8Array, salt: Uint8Array): Promise<CryptoKey> {
-  const base = await crypto.subtle.importKey('raw', secret, 'PBKDF2', false, ['deriveKey'])
+  const base = await crypto.subtle.importKey('raw', toArrayBuffer(secret), 'PBKDF2', false, ['deriveKey'])
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: toArrayBuffer(salt), iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
     base,
     { name: 'AES-GCM', length: 256 },
     false,
@@ -114,7 +116,11 @@ export async function createVaultWithRecovery(userId: string): Promise<{ recover
   const salt = crypto.getRandomValues(new Uint8Array(16))
   const wrapKey = await deriveWrapKey(recovery, salt)
   const iv = crypto.getRandomValues(new Uint8Array(12))
-  const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, wrapKey, vmkRaw)
+  const wrapped = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: toArrayBuffer(iv) },
+    wrapKey,
+    toArrayBuffer(vmkRaw),
+  )
   const packed = new Uint8Array(1 + iv.byteLength + wrapped.byteLength)
   packed[0] = 1
   packed.set(iv, 1)
@@ -146,7 +152,11 @@ export async function unlockWithRecovery(userId: string, recoveryInput: string):
   const ct = packed.slice(13)
   const secret = parseRecoverySecret(recoveryInput)
   const wrapKey = await deriveWrapKey(secret, salt)
-  const vmkBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, wrapKey, ct)
+  const vmkBuf = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: toArrayBuffer(iv) },
+    wrapKey,
+    toArrayBuffer(ct),
+  )
   const vmkRaw = new Uint8Array(vmkBuf)
   return persistLocalMasterKey(vmkRaw)
 }

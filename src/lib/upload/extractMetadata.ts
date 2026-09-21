@@ -40,20 +40,23 @@ export async function extractMediaMetadata(file: File): Promise<ExtractedMeta> {
     capturedAt: null,
     mime,
   }
-
-  if (isImageUpload(file)) {
-    const dim = await withTimeout(imageSize(file), META_TIMEOUT_MS, { width: null, height: null })
-    return { ...base, ...dim }
+  try {
+    if (isImageUpload(file)) {
+      const dim = await withTimeout(imageSize(file), META_TIMEOUT_MS, { width: null, height: null })
+      return { ...base, ...dim }
+    }
+    if (isVideoUpload(file)) {
+      const v = await withTimeout(videoMeta(file), META_TIMEOUT_MS, {
+        width: null,
+        height: null,
+        durationMs: null,
+      })
+      return { ...base, ...v }
+    }
+    return base
+  } catch {
+    return base
   }
-  if (isVideoUpload(file)) {
-    const v = await withTimeout(videoMeta(file), META_TIMEOUT_MS, {
-      width: null,
-      height: null,
-      durationMs: null,
-    })
-    return { ...base, ...v }
-  }
-  return base
 }
 
 function imageSize(file: File): Promise<{ width: number | null; height: number | null }> {
