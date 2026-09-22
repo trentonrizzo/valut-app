@@ -124,5 +124,6 @@ export async function apiSignedGet(accessToken: string, fileId: string, variant:
     metadata?: Record<string, unknown> | null
     mimeType?: string | null
     fileName?: string | null
+    expiresIn?: number | null
   }>(res, 'signed-get')
 }

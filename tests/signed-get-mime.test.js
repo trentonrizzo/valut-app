@@ -20,10 +20,13 @@ describe('signed GET video content type', () => {
   it('signed GET stays inline and CORS exposes range headers', () => {
     const signed = readFileSync(join(root, 'api/storage/signed-get.js'), 'utf8')
     const cors = readFileSync(join(root, 'api/storage/_s3.js'), 'utf8')
+    const resolve = readFileSync(join(root, 'src/lib/media/resolveMedia.ts'), 'utf8')
     expect(signed).toContain('responseContentType')
     expect(signed).toContain("ResponseContentDisposition: 'inline'")
     expect(cors).toContain('Content-Range')
     expect(cors).toContain('Accept-Ranges')
     expect(cors).toMatch(/AllowedMethods: \['GET', 'PUT', 'HEAD'\]/)
+    expect(resolve).toContain('fetchSignedWithRetry')
+    expect(resolve).toContain('invalidateSignedMedia')
   })
 })

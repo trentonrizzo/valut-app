@@ -92,6 +92,15 @@ const MIME_BY_EXT: Record<string, string> = {
   webp: 'image/webp',
   heic: 'image/heic',
   heif: 'image/heif',
+  hevc: 'video/mp4',
+  h265: 'video/mp4',
+}
+
+export function stripMimeParams(raw: string): string {
+  return String(raw || '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase()
 }
 
 export function extOf(name: string): string {
@@ -100,14 +109,19 @@ export function extOf(name: string): string {
 }
 
 export function normalizeUploadMime(file: { name: string; type?: string }): string {
-  const raw = (file.type || '').trim().toLowerCase()
+  const raw = stripMimeParams(file.type || '')
   if (raw && raw !== 'application/octet-stream' && raw !== 'binary/octet-stream') return raw
   return MIME_BY_EXT[extOf(file.name)] || raw || 'application/octet-stream'
 }
 
 export function isVideoUpload(file: { name: string; type?: string }): boolean {
   const mime = normalizeUploadMime(file)
-  return mime.startsWith('video/') || /^(mp4|m4v|mov|qt|webm|mkv|ogv|ogg)$/.test(extOf(file.name))
+  const ext = extOf(file.name)
+  return (
+    mime.startsWith('video/') ||
+    mime === 'application/mxf' ||
+    /^(mp4|m4v|mov|qt|webm|mkv|ogv|ogg|hevc|h265)$/.test(ext)
+  )
 }
 
 export function isImageUpload(file: { name: string; type?: string }): boolean {

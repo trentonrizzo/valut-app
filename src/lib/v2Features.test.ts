@@ -6,6 +6,8 @@ import { classifyFileKind, isPhotoKind } from './fileKind'
 import { storedObjectBytes } from './upload/storedSize'
 import { canCatalogReady, fileMatchesResume, planUpload } from './upload/strategy'
 import { filesFromInput, inspectSelectedFile, selectionFailureReason } from './upload/selectFiles'
+import { advancedFilterCount, clearAdvancedFilters } from './libraryFilters'
+import { DEFAULT_MEDIA_FILTERS } from '../types/media'
 import { CHUNK_PLAINTEXT_BYTES, GCM_TAG_BYTES } from './crypto/chunkCipher'
 import { emptyPayload } from './editor/projects'
 import { albumViewAllowed } from './albumPin'
@@ -114,6 +116,10 @@ describe('editor projects do not rewrite originals', () => {
     const src = readFileSync(join(root, 'src/lib/editor/projects.ts'), 'utf8')
     expect(src).not.toContain('DeleteObject')
     expect(src).toContain('editor_projects')
+    const editor = readFileSync(join(root, 'src/pages/Editor.tsx'), 'utf8')
+    expect(editor).toContain('VaultPhotoTileMedia')
+    expect(editor).toContain('useDecryptedMediaSrc')
+    expect(editor).not.toContain('r2://')
   })
 })
 
@@ -125,5 +131,28 @@ describe('deleted items stay out of album galleries', () => {
   it('restored media with null deleted_at is visible again', () => {
     expect(isAlbumGalleryFile({ purpose: 'content', upload_status: 'ready', deleted_at: null })).toBe(true)
     expect(isAlbumGalleryFile({ purpose: 'content', upload_status: null, deleted_at: null })).toBe(true)
+  })
+})
+
+describe('library filter compaction', () => {
+  it('counts advanced filters and keeps search/sort when clearing', () => {
+    expect(advancedFilterCount(DEFAULT_MEDIA_FILTERS)).toBe(0)
+    expect(
+      advancedFilterCount({
+        ...DEFAULT_MEDIA_FILTERS,
+        type: 'videos',
+        favorite: 'yes',
+        resolution: '2160',
+      }),
+    ).toBe(3)
+    const cleared = clearAdvancedFilters({
+      ...DEFAULT_MEDIA_FILTERS,
+      search: 'beach',
+      sort: 'largest',
+      type: 'photos',
+    })
+    expect(cleared.search).toBe('beach')
+    expect(cleared.sort).toBe('largest')
+    expect(cleared.type).toBe('all')
   })
 })

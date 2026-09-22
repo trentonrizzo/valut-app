@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../context/useAuth'
 import { useVault } from '../context/useVault'
-import { resolveVaultMedia } from '../lib/media/resolveMedia'
+import { invalidateSignedMedia, resolveVaultMedia } from '../lib/media/resolveMedia'
 import { isBlobUrl, isHttpsUrl } from '../lib/media/legacyUrl'
 
 export type VaultMediaState = {
@@ -14,6 +14,7 @@ export type VaultMediaState = {
 /**
  * Local blob URLs and legacy HTTPS display immediately.
  * Private objects resolve via authenticated signed GET.
+ * fileId alone is enough for r2:// rows (editor slots, reloaded projects).
  */
 export function useDecryptedMediaSrc(
   storedUrl: string | null | undefined,
@@ -29,12 +30,12 @@ export function useDecryptedMediaSrc(
   const [state, setState] = useState<VaultMediaState>({
     displayUrl: immediate,
     downloadUrl: immediate,
-    loading: Boolean(storedUrl && !immediate),
+    loading: Boolean((storedUrl || fileId) && !immediate),
     failed: false,
   })
 
   useEffect(() => {
-    if (!storedUrl) {
+    if (!storedUrl && !fileId) {
       setState({ displayUrl: null, downloadUrl: null, loading: false, failed: false })
       return
     }
@@ -47,29 +48,37 @@ export function useDecryptedMediaSrc(
       setState({ displayUrl: https, downloadUrl: https, loading: false, failed: false })
     }
     if (!fileId || !token) {
-      if (!https) setState({ displayUrl: null, downloadUrl: null, loading: false, failed: true })
+      if (!https) setState({ displayUrl: null, downloadUrl: null, loading: Boolean(fileId && !token), failed: false })
       return
     }
     let alive = true
     if (!https) setState((s) => ({ ...s, loading: true, failed: false }))
-    resolveVaultMedia({
-      fileId,
-      accessToken: token,
-      masterKey,
-      fallbackUrl: storedUrl,
-    })
-      .then((r) => {
-        if (!alive) return
-        setState({ displayUrl: r.displayUrl, downloadUrl: r.downloadUrl, loading: false, failed: false })
+
+    const run = (retried: boolean): Promise<void> =>
+      resolveVaultMedia({
+        fileId,
+        accessToken: token,
+        masterKey,
+        fallbackUrl: storedUrl,
       })
-      .catch(() => {
-        if (!alive) return
-        if (https) {
-          setState({ displayUrl: https, downloadUrl: https, loading: false, failed: false })
-        } else {
-          setState({ displayUrl: null, downloadUrl: null, loading: false, failed: true })
-        }
-      })
+        .then((r) => {
+          if (!alive) return
+          setState({ displayUrl: r.displayUrl, downloadUrl: r.downloadUrl, loading: false, failed: false })
+        })
+        .catch(() => {
+          if (!alive) return
+          if (!retried) {
+            invalidateSignedMedia(fileId)
+            return run(true)
+          }
+          if (https) {
+            setState({ displayUrl: https, downloadUrl: https, loading: false, failed: false })
+          } else {
+            setState({ displayUrl: null, downloadUrl: null, loading: false, failed: true })
+          }
+        })
+
+    void run(false)
     return () => {
       alive = false
     }

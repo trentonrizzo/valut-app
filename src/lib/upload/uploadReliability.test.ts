@@ -65,6 +65,10 @@ describe('metadata extraction never blocks upload', () => {
     expect(src).toContain('return base')
     const manager = readFileSync(join(root, 'lib/upload/manager.ts'), 'utf8')
     expect(manager).toContain('metadata-failed')
+    expect(manager).toContain('metadata-skipped')
+    expect(manager).toContain('isImageUpload(file)')
+    expect(manager).toContain('probeSelectedFile')
+    expect(manager).toContain('ERR_EMPTY_FILE')
     expect(manager).toContain('expectedVerifySize')
   })
 })
@@ -76,6 +80,12 @@ describe('MOV / video MIME handling', () => {
     expect(isVideoMime('video/quicktime', 'IMG_0099.MOV')).toBe(true)
     expect(isVideoFileName('holiday.MOV')).toBe(true)
     expect(isVideoUpload({ name: 'IMG_0099.MOV', type: 'application/octet-stream' })).toBe(true)
+  })
+
+  it('strips HEVC codec parameters and still treats 4K camera files as video', () => {
+    expect(normalizeUploadMime({ name: 'IMG_4K.MOV', type: 'video/mp4; codecs="hvc1.1.6.L123.B0"' })).toBe('video/mp4')
+    expect(isVideoUpload({ name: 'IMG_4K.MOV', type: 'video/quicktime' })).toBe(true)
+    expect(isVideoUpload({ name: 'clip.m4v', type: '' })).toBe(true)
   })
 })
 
@@ -331,6 +341,7 @@ describe('18MB multipart MOV regression', () => {
   it('N: poster failure does not fail verified original', () => {
     const src = readFileSync(join(root, 'lib/upload/manager.ts'), 'utf8')
     expect(src).toContain('sidecars are best-effort')
+    expect(src).toContain('isIosDevice')
     expect(canCatalogReady({ r2Verified: true, verifiedSize: 18, size: 18 })).toBe(true)
   })
 

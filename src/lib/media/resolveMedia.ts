@@ -11,6 +11,77 @@ export type ResolvedMedia = {
   mode: 'legacy-public' | 'signed' | 'blob'
 }
 
+type SignedCacheEntry = {
+  url: string
+  mode: 'signed' | 'legacy-public'
+  encryptionVersion: number
+  chunkSize?: number | null
+  wrappedDek?: string | null
+  metadata?: Record<string, unknown> | null
+  mimeType?: string | null
+  expiresAt: number
+}
+
+const signedCache = new Map<string, SignedCacheEntry>()
+const inFlight = new Map<string, Promise<SignedCacheEntry>>()
+
+function cacheKey(fileId: string, variant: string) {
+  return `${fileId}:${variant}`
+}
+
+export function invalidateSignedMedia(fileId: string, variant?: string) {
+  if (variant) {
+    signedCache.delete(cacheKey(fileId, variant))
+    inFlight.delete(cacheKey(fileId, variant))
+    return
+  }
+  for (const k of [...signedCache.keys()]) {
+    if (k.startsWith(`${fileId}:`)) signedCache.delete(k)
+  }
+  for (const k of [...inFlight.keys()]) {
+    if (k.startsWith(`${fileId}:`)) inFlight.delete(k)
+  }
+}
+
+async function fetchSigned(accessToken: string, fileId: string, variant: 'original' | 'thumb' | 'poster'): Promise<SignedCacheEntry> {
+  const key = cacheKey(fileId, variant)
+  const cached = signedCache.get(key)
+  if (cached && cached.expiresAt > Date.now() + 15_000) return cached
+  const existing = inFlight.get(key)
+  if (existing) return existing
+  const pending = (async () => {
+    const signed = await apiSignedGet(accessToken, fileId, variant)
+    const ttlMs = Math.max(30_000, ((signed.expiresIn ?? 15 * 60) - 90) * 1000)
+    const entry: SignedCacheEntry = {
+      url: signed.url,
+      mode: signed.mode,
+      encryptionVersion: signed.encryptionVersion ?? 0,
+      chunkSize: signed.chunkSize,
+      wrappedDek: signed.wrappedDek,
+      metadata: signed.metadata,
+      mimeType: signed.mimeType,
+      expiresAt: Date.now() + ttlMs,
+    }
+    signedCache.set(key, entry)
+    return entry
+  })()
+  inFlight.set(key, pending)
+  try {
+    return await pending
+  } finally {
+    inFlight.delete(key)
+  }
+}
+
+async function fetchSignedWithRetry(accessToken: string, fileId: string, variant: 'original' | 'thumb' | 'poster'): Promise<SignedCacheEntry> {
+  try {
+    return await fetchSigned(accessToken, fileId, variant)
+  } catch {
+    invalidateSignedMedia(fileId, variant)
+    return fetchSigned(accessToken, fileId, variant)
+  }
+}
+
 async function decryptRemoteChunks(opts: {
   signedUrl: string
   wrappedDek: string
@@ -81,7 +152,7 @@ export async function resolveVaultMedia(opts: {
   }
 
   try {
-    const signed = await apiSignedGet(opts.accessToken, opts.fileId, variant)
+    const signed = await fetchSignedWithRetry(opts.accessToken, opts.fileId, variant)
     const encV = signed.encryptionVersion ?? 0
     if (signed.mode === 'legacy-public' || encV === 0 || variant !== 'original') {
       return { displayUrl: signed.url, downloadUrl: signed.url, mode: signed.mode === 'legacy-public' ? 'legacy-public' : 'signed' }

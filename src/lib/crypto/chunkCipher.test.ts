@@ -54,4 +54,11 @@ describe('chunked AES-GCM', () => {
   it('does not export a whole-file encrypt helper from the v1.1 module', () => {
     expect('encryptFile' in chunkCipher).toBe(false)
   })
+
+  it('falls back to FileReader when slice.arrayBuffer fails', async () => {
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync(new URL('./chunkCipher.ts', import.meta.url), 'utf8')
+    expect(src).toContain('FileReader')
+    expect(src).toContain('readViaFileReader')
+  })
 })

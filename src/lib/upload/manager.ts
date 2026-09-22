@@ -24,7 +24,7 @@ import {
   apiVerifyObject,
 } from './storageApi'
 import { deleteJob, listJobs, saveJob, type PersistedUploadJob, type UploadUiState } from './queueStore'
-import { fileConcurrency, partConcurrency, putWithRetry } from './multipartConfig'
+import { fileConcurrency, isIosDevice, partConcurrency, putWithRetry } from './multipartConfig'
 import { extractMediaMetadata, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
 import {
   canCatalogReady,
@@ -42,7 +42,7 @@ import {
 } from './strategy'
 import { reconcilePersistedJob, shouldSkipByteUpload } from './finalizePolicy'
 import { expectedVerifySize, storedObjectBytes } from './storedSize'
-import { inspectSelectedFile, logUploadSelection } from './selectFiles'
+import { inspectSelectedFile, logUploadSelection, probeSelectedFile } from './selectFiles'
 
 export type LiveUploadItem = PersistedUploadJob & {
   speedBps: number
@@ -148,7 +148,30 @@ export async function enqueueFiles(files: File[], opts: { albumId: string | null
   const purpose = opts.purpose ?? 'content'
   const ids: string[] = []
   let n = 0
+  const usable: File[] = []
   for (const file of files) {
+    const inspected = inspectSelectedFile(file)
+    const probe = await probeSelectedFile(file)
+    logUploadSelection('select', {
+      name: inspected.name,
+      size: inspected.size,
+      type: inspected.type,
+      extension: inspected.extension,
+      lastModified: inspected.lastModified,
+      zeroByte: probe.zeroByte,
+      readable: probe.readable,
+      readableBytes: probe.readableBytes,
+    })
+    if (probe.zeroByte || !probe.readable) continue
+    usable.push(file)
+  }
+  if (usable.length === 0) {
+    throw codedError(
+      'ERR_EMPTY_FILE',
+      'The selected item is empty or not readable on this iPhone. If it is in iCloud, open Photos, download it, then select it again. Vault will not create a 0-byte object.',
+    )
+  }
+  for (const file of usable) {
     const limit = providerLimitError(file.size)
     if (limit) throw codedError('ERR_PROVIDER_LIMIT', `${file.name}: ${limit}`)
     const id = crypto.randomUUID()
@@ -380,28 +403,36 @@ async function runJob(id: string) {
 
   try {
     if (file) {
-      try {
-        const meta = await extractMediaMetadata(file)
-        logUploadSelection('metadata', {
-          name: file.name,
-          width: meta.width,
-          height: meta.height,
-          durationMs: meta.durationMs,
-          mime: meta.mime,
-        })
-        job = {
-          ...job,
-          width: job.width ?? meta.width,
-          height: job.height ?? meta.height,
-          durationMs: job.durationMs ?? meta.durationMs,
-          capturedAt: job.capturedAt ?? meta.capturedAt,
-          type: normalizeUploadMime(file) || meta.mime || job.type,
+      if (isImageUpload(file)) {
+        try {
+          const meta = await extractMediaMetadata(file)
+          logUploadSelection('metadata', {
+            name: file.name,
+            width: meta.width,
+            height: meta.height,
+            durationMs: meta.durationMs,
+            mime: meta.mime,
+          })
+          job = {
+            ...job,
+            width: job.width ?? meta.width,
+            height: job.height ?? meta.height,
+            durationMs: job.durationMs ?? meta.durationMs,
+            capturedAt: job.capturedAt ?? meta.capturedAt,
+            type: normalizeUploadMime(file) || meta.mime || job.type,
+          }
+          await persist(job)
+        } catch (metaErr) {
+          logUploadSelection('metadata-failed', {
+            name: file.name,
+            error: metaErr instanceof Error ? metaErr.message : String(metaErr),
+          })
         }
-        await persist(job)
-      } catch (metaErr) {
-        logUploadSelection('metadata-failed', {
+      } else {
+        logUploadSelection('metadata-skipped', {
           name: file.name,
-          error: metaErr instanceof Error ? metaErr.message : String(metaErr),
+          type: job.type,
+          size: job.size,
         })
       }
     }
@@ -496,7 +527,8 @@ async function runJob(id: string) {
     if (file) {
       try {
         const thumb = isImageUpload(file) ? await makeImageThumbnail(file) : null
-        const poster = !thumb && isVideoUpload(file) ? await makeVideoPoster(file) : null
+        const poster =
+          !thumb && isVideoUpload(file) && !isIosDevice() ? await makeVideoPoster(file) : null
         if (thumb) {
           thumbnailKey = await uploadSidecar(authFetch, thumb, thumbKey(userId, `${job.objectId}-t`)).catch(() => null)
         }

@@ -51,13 +51,16 @@ function SlideImage({
   file: FileRow
   userId: string
 }) {
-  const { displayUrl, failed } = useDecryptedMediaSrc(
+  const { displayUrl, failed, loading } = useDecryptedMediaSrc(
     file.file_url,
     file.is_encrypted,
     userId,
     file.file_name,
     file.id,
   )
+  if (loading || (!displayUrl && !failed)) {
+    return <div className="fs-media-viewer__loading" role="status" aria-label="Loading image" />
+  }
   if (failed || !displayUrl) {
     return <div className="fs-media-viewer__failed" aria-label="Could not load image" />
   }
@@ -77,7 +80,7 @@ function SlideVideo({
   playbackRate: number
   loop: boolean
 }) {
-  const { displayUrl, failed } = useDecryptedMediaSrc(
+  const { displayUrl, failed, loading } = useDecryptedMediaSrc(
     file.file_url,
     file.is_encrypted,
     userId,
@@ -86,9 +89,11 @@ function SlideVideo({
   )
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [playFailure, setPlayFailure] = useState<PlaybackFailureKind | null>(null)
+  const [retriedPlay, setRetriedPlay] = useState(false)
 
   useEffect(() => {
     setPlayFailure(null)
+    setRetriedPlay(false)
   }, [displayUrl])
 
   useEffect(() => {
@@ -113,6 +118,9 @@ function SlideVideo({
     }
   }, [isActive, displayUrl, loop])
 
+  if (loading || (!displayUrl && !failed)) {
+    return <div className="fs-media-viewer__loading" role="status" aria-label="Loading video" />
+  }
   if (failed || !displayUrl) {
     return (
       <div className="fs-media-viewer__failed" role="status">
@@ -138,7 +146,19 @@ function SlideVideo({
         preload="metadata"
         loop={loop}
         src={displayUrl}
-        onError={() => setPlayFailure(classifyVideoElementError(videoRef.current))}
+        onError={() => {
+          const kind = classifyVideoElementError(videoRef.current)
+          if (!retriedPlay && (kind === 'network' || kind === 'authorization')) {
+            setRetriedPlay(true)
+            const el = videoRef.current
+            if (el && displayUrl) {
+              el.src = displayUrl
+              el.load()
+              return
+            }
+          }
+          setPlayFailure(kind)
+        }}
       />
     </div>
   )

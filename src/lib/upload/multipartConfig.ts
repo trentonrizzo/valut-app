@@ -91,6 +91,12 @@ function xhrPut(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open('PUT', url, true)
+    const contentType = body.type || 'application/octet-stream'
+    try {
+      xhr.setRequestHeader('Content-Type', contentType)
+    } catch {
+      /* ignore */
+    }
     xhr.upload.onprogress = (ev) => {
       if (ev.lengthComputable) onProgress(ev.loaded)
     }

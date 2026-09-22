@@ -70,8 +70,26 @@ export function newFileNonce(): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(FILE_NONCE_BYTES))
 }
 
+async function readViaFileReader(blob: Blob): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onload = () => {
+      if (fr.result instanceof ArrayBuffer) resolve(fr.result)
+      else reject(new Error('FileReader did not return bytes'))
+    }
+    fr.onerror = () => reject(fr.error || new Error('FileReader failed'))
+    fr.readAsArrayBuffer(blob)
+  })
+}
+
 /** Read one plaintext slice from a File without loading the rest. */
 export async function readFileSlice(file: Blob, start: number, end: number): Promise<ArrayBuffer> {
   const slice = file.slice(start, end)
-  return slice.arrayBuffer()
+  try {
+    const buf = await slice.arrayBuffer()
+    if (slice.size > 0 && buf.byteLength === 0) throw new Error('empty slice')
+    return buf
+  } catch {
+    return readViaFileReader(slice)
+  }
 }

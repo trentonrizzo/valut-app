@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
+import { supabase } from '../lib/supabase'
 import { listMediaPage } from '../lib/mediaQueries'
 import { DEFAULT_MEDIA_FILTERS } from '../types/media'
 import type { FileRow } from '../types/media'
@@ -13,8 +14,18 @@ import {
   saveEditorProject,
   type EditorProject,
   type EditorProjectPayload,
+  type EditorSlot,
 } from '../lib/editor/projects'
 import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
+import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
+
+const LAYOUTS: { id: EditorProjectPayload['layout']; label: string }[] = [
+  { id: '1', label: '1' },
+  { id: '1x2', label: '2 across' },
+  { id: '2x1', label: '2 stacked' },
+  { id: '1+2', label: '3' },
+  { id: '2x2', label: '2×2' },
+]
 
 export function Editor() {
   const { user } = useAuth()
@@ -24,21 +35,59 @@ export function Editor() {
   const [payload, setPayload] = useState<EditorProjectPayload>(emptyPayload('2x2'))
   const [projectId, setProjectId] = useState<string | undefined>()
   const [picker, setPicker] = useState<FileRow[]>([])
+  const [pickerCursor, setPickerCursor] = useState<{ ts: string | null; id: string; num: number | null } | null>(null)
   const [slotIndex, setSlotIndex] = useState<number | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [fileById, setFileById] = useState<Record<string, FileRow>>({})
   const exportCaps = useMemo(() => exportSupported(), [])
 
   useEffect(() => {
     if (!user) return
     void listEditorProjects(user.id).then(setProjects).catch((e) => showToast(e instanceof Error ? e.message : 'Could not load projects', 'error'))
-    void listMediaPage({ userId: user.id, filters: DEFAULT_MEDIA_FILTERS, limit: 60 })
-      .then((p) => setPicker(p.rows))
+    void listMediaPage({ userId: user.id, filters: DEFAULT_MEDIA_FILTERS, limit: 48 })
+      .then((p) => {
+        setPicker(p.rows)
+        setPickerCursor(p.nextCursor)
+        setFileById((prev) => {
+          const next = { ...prev }
+          for (const r of p.rows) next[r.id] = r
+          return next
+        })
+      })
       .catch(() => {})
   }, [user, showToast])
+
+  useEffect(() => {
+    if (!user) return
+    const missing = payload.slots
+      .map((s) => s.fileId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0 && !fileById[id])
+    if (missing.length === 0) return
+    void supabase
+      .from('files')
+      .select('*')
+      .eq('user_id', user.id)
+      .in('id', missing)
+      .then(({ data }) => {
+        if (!data) return
+        setFileById((prev) => {
+          const next = { ...prev }
+          for (const row of data as FileRow[]) next[row.id] = row
+          return next
+        })
+      })
+  }, [payload.slots, user, fileById])
 
   function setLayout(layout: EditorProjectPayload['layout']) {
     const next = emptyPayload(layout)
     next.slots = next.slots.map((s, i) => payload.slots[i] ?? s)
     setPayload(next)
+  }
+
+  function updateSlot(index: number, patch: Partial<EditorSlot>) {
+    const slots = payload.slots.slice()
+    slots[index] = { ...slots[index]!, ...patch }
+    setPayload({ ...payload, slots })
   }
 
   async function save() {
@@ -58,28 +107,43 @@ export function Editor() {
     }
   }
 
+  function chooseFile(file: FileRow) {
+    if (slotIndex == null) return
+    const kind = classifyFileKind({ name: file.file_name, mime_type: file.mime_type })
+    if (kind !== 'image' && kind !== 'video') return
+    setFileById((prev) => ({ ...prev, [file.id]: file }))
+    updateSlot(slotIndex, {
+      fileId: file.id,
+      kind,
+      muted: kind === 'video' ? slotIndex !== payload.audioMasterIndex : true,
+    })
+    setPickerOpen(false)
+  }
+
   return (
     <div className="dashboard editor-page">
       <main className="dashboard__main">
         <div className="dashboard__toolbar">
           <div>
             <h1 className="dashboard__title">Editor</h1>
-            <p className="dashboard__subtitle">Non-destructive collage / trim projects. Originals stay untouched.</p>
+            <p className="dashboard__subtitle">Non-destructive collage. Originals stay untouched.</p>
           </div>
           <button type="button" className="btn btn--primary" onClick={() => void save()}>
             Save project
           </button>
         </div>
-        <div className="filter-bar">
+        <div className="library-controls__row">
           <input className="field-input" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Project title" />
-          {(['1', '1x2', '2x1', '1+2', '2x2'] as const).map((l) => (
+        </div>
+        <div className="library-controls__row">
+          {LAYOUTS.map((l) => (
             <button
-              key={l}
+              key={l.id}
               type="button"
-              className={`btn btn--ghost ${payload.layout === l ? 'is-on' : ''}`}
-              onClick={() => setLayout(l)}
+              className={`btn btn--ghost ${payload.layout === l.id ? 'is-on' : ''}`}
+              onClick={() => setLayout(l.id)}
             >
-              {l}
+              {l.label}
             </button>
           ))}
         </div>
@@ -89,98 +153,73 @@ export function Editor() {
               key={i}
               type="button"
               className={`editor-slot ${slotIndex === i ? 'is-on' : ''}`}
-              onClick={() => setSlotIndex(i)}
+              onClick={() => {
+                setSlotIndex(i)
+                if (!slot.fileId) setPickerOpen(true)
+              }}
             >
               {slot.fileId ? (
-                <EditorSlotPreview fileId={slot.fileId} files={picker} />
+                <EditorSlotPreview file={fileById[slot.fileId]} fileId={slot.fileId} objectFit={slot.objectFit} />
               ) : (
                 <span>Tap to choose media</span>
               )}
             </button>
           ))}
         </div>
-        {slotIndex != null ? (
-          <div className="editor-tools">
-            <p className="dashboard__subtitle">Slot {slotIndex + 1}</p>
-            <div className="editor-picker">
-              {picker.map((f) => {
-                const kind = classifyFileKind({ name: f.file_name, mime_type: f.mime_type })
-                if (kind !== 'image' && kind !== 'video') return null
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    className="btn btn--outline"
-                    onClick={() => {
-                      const slots = payload.slots.slice()
-                      slots[slotIndex] = {
-                        ...slots[slotIndex]!,
-                        fileId: f.id,
-                        kind,
-                        muted: kind === 'video' ? slotIndex !== payload.audioMasterIndex : true,
-                      }
-                      setPayload({ ...payload, slots })
-                    }}
-                  >
-                    {f.file_name}
-                  </button>
-                )
-              })}
-            </div>
-            {payload.slots[slotIndex]?.kind === 'video' ? (
-              <div className="filter-bar">
-                <label className="filter-bar__num">
-                  Trim start (s)
-                  <input
-                    className="field-input"
-                    type="number"
-                    min={0}
-                    value={payload.slots[slotIndex]!.trimStart}
-                    onChange={(e) => {
-                      const slots = payload.slots.slice()
-                      slots[slotIndex] = { ...slots[slotIndex]!, trimStart: Number(e.target.value) || 0 }
-                      setPayload({ ...payload, slots })
-                    }}
-                  />
-                </label>
-                <label className="filter-bar__num">
-                  <input
-                    type="checkbox"
-                    checked={!payload.slots[slotIndex]!.muted}
-                    onChange={(e) => {
-                      const slots = payload.slots.slice()
-                      slots[slotIndex] = { ...slots[slotIndex]!, muted: !e.target.checked }
-                      setPayload({ ...payload, slots })
-                    }}
-                  />
-                  Audio on
-                </label>
+        {slotIndex != null && payload.slots[slotIndex] ? (
+          <EditorSlotTools
+            slot={payload.slots[slotIndex]!}
+            file={payload.slots[slotIndex]!.fileId ? fileById[payload.slots[slotIndex]!.fileId!] : undefined}
+            onChange={(patch) => updateSlot(slotIndex, patch)}
+            onReplace={() => setPickerOpen(true)}
+            onRemove={() => updateSlot(slotIndex, emptyPayload().slots[0]!)}
+            onAudioMaster={() => setPayload({ ...payload, audioMasterIndex: slotIndex })}
+          />
+        ) : null}
+        {pickerOpen ? (
+          <div className="sheet-root">
+            <button type="button" className="sheet-backdrop" aria-label="Close picker" onClick={() => setPickerOpen(false)} />
+            <div className="sheet sheet--tall" role="dialog" aria-label="Choose media">
+              <div className="sheet__handle" />
+              <h2 className="sheet__title">Choose media</h2>
+              <div className="editor-picker-grid">
+                {picker.map((f) => {
+                  const kind = classifyFileKind({ name: f.file_name, mime_type: f.mime_type })
+                  if (kind !== 'image' && kind !== 'video') return null
+                  return (
+                    <button key={f.id} type="button" className="editor-picker-tile" onClick={() => chooseFile(f)}>
+                      {user ? <VaultPhotoTileMedia file={f} userId={user.id} /> : null}
+                    </button>
+                  )
+                })}
+              </div>
+              {pickerCursor ? (
                 <button
                   type="button"
-                  className="btn btn--ghost"
-                  onClick={() => setPayload({ ...payload, audioMasterIndex: slotIndex })}
+                  className="btn btn--outline"
+                  onClick={() => {
+                    if (!user) return
+                    void listMediaPage({ userId: user.id, filters: DEFAULT_MEDIA_FILTERS, cursor: pickerCursor, limit: 48 }).then((p) => {
+                      setPicker((prev) => [...prev, ...p.rows])
+                      setPickerCursor(p.nextCursor)
+                      setFileById((prev) => {
+                        const next = { ...prev }
+                        for (const r of p.rows) next[r.id] = r
+                        return next
+                      })
+                    })
+                  }}
                 >
-                  Make audio master
+                  Load more
                 </button>
-              </div>
-            ) : null}
-            <button
-              type="button"
-              className="btn btn--ghost"
-              onClick={() => {
-                const slots = payload.slots.slice()
-                slots[slotIndex] = emptyPayload().slots[0]!
-                setPayload({ ...payload, slots })
-              }}
-            >
-              Clear slot
-            </button>
+              ) : null}
+            </div>
           </div>
         ) : null}
         <p className="dashboard__subtitle">
           Export:{' '}
           {exportCaps.mediaRecorder
-            ? 'This browser reports MediaRecorder. Export of a new Vault file is still limited on iPhone — save the project instead of forcing a 4K render.'
+            ? 'Save the project instead of forcing a 4K render. A future export will create a new Vault file without changing originals.'
             : 'Export is unavailable on this device. The project stays editable and originals are safe.'}
         </p>
         <h2 className="settings-section__heading">Saved projects</h2>
@@ -216,11 +255,135 @@ export function Editor() {
   )
 }
 
-function EditorSlotPreview({ fileId, files }: { fileId: string; files: FileRow[] }) {
-  const file = files.find((f) => f.id === fileId)
-  const { displayUrl } = useDecryptedMediaSrc(file?.file_url ?? null, file?.is_encrypted, file?.user_id ?? null, file?.file_name ?? '', fileId)
-  if (!file || !displayUrl) return <span>{file?.file_name ?? 'Media'}</span>
-  const kind = classifyFileKind({ name: file.file_name, mime_type: file.mime_type })
-  if (kind === 'video') return <video src={displayUrl} muted playsInline preload="metadata" />
-  return <img src={displayUrl} alt="" />
+function EditorSlotPreview({
+  file,
+  fileId,
+  objectFit,
+}: {
+  file?: FileRow
+  fileId: string
+  objectFit: 'cover' | 'contain'
+}) {
+  const { displayUrl, loading, failed } = useDecryptedMediaSrc(
+    file?.file_url ?? null,
+    file?.is_encrypted,
+    file?.user_id ?? null,
+    file?.file_name ?? '',
+    fileId,
+  )
+  const kind = classifyFileKind({ name: file?.file_name, mime_type: file?.mime_type })
+  if (loading || (!displayUrl && !failed)) return <div className="editor-slot__skeleton" aria-hidden />
+  if (failed || !displayUrl) return <span>Could not load preview</span>
+  if (kind === 'video' || file?.mime_type?.startsWith('video/')) {
+    return <video src={displayUrl} muted playsInline preload="metadata" style={{ objectFit }} />
+  }
+  return <img src={displayUrl} alt="" style={{ objectFit }} />
+}
+
+function EditorSlotTools({
+  slot,
+  file,
+  onChange,
+  onReplace,
+  onRemove,
+  onAudioMaster,
+}: {
+  slot: EditorSlot
+  file?: FileRow
+  onChange: (patch: Partial<EditorSlot>) => void
+  onReplace: () => void
+  onRemove: () => void
+  onAudioMaster: () => void
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const { displayUrl } = useDecryptedMediaSrc(file?.file_url ?? null, file?.is_encrypted, file?.user_id ?? null, file?.file_name ?? '', slot.fileId)
+  const isVideo = slot.kind === 'video'
+
+  return (
+    <div className="editor-tools">
+      <div className="library-controls__row">
+        <button type="button" className="btn btn--outline" onClick={onReplace}>
+          Replace
+        </button>
+        <button type="button" className="btn btn--ghost" onClick={onRemove}>
+          Remove
+        </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => onChange({ objectFit: slot.objectFit === 'cover' ? 'contain' : 'cover' })}
+        >
+          {slot.objectFit === 'cover' ? 'Fill' : 'Fit'}
+        </button>
+      </div>
+      {isVideo && displayUrl ? (
+        <div className="editor-video-tools">
+          <video
+            ref={videoRef}
+            src={displayUrl}
+            muted={slot.muted}
+            playsInline
+            controls={false}
+            preload="metadata"
+            className="editor-video-tools__preview"
+          />
+          <div className="library-controls__row">
+            <button
+              type="button"
+              className="btn btn--outline"
+              onClick={() => {
+                const el = videoRef.current
+                if (!el) return
+                if (el.paused) void el.play().catch(() => {})
+                else el.pause()
+              }}
+            >
+              Play / Pause
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={() => onChange({ muted: !slot.muted })}>
+              {slot.muted ? 'Unmute' : 'Mute'}
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={onAudioMaster}>
+              Audio master
+            </button>
+          </div>
+          <label className="filter-bar__num">
+            Scrub
+            <input
+              className="field-input"
+              type="range"
+              min={0}
+              max={1000}
+              defaultValue={0}
+              onChange={(e) => {
+                const el = videoRef.current
+                if (!el || !Number.isFinite(el.duration)) return
+                el.currentTime = (Number(e.target.value) / 1000) * el.duration
+              }}
+            />
+          </label>
+          <label className="filter-bar__num">
+            Trim start (s)
+            <input
+              className="field-input"
+              type="number"
+              min={0}
+              value={slot.trimStart}
+              onChange={(e) => onChange({ trimStart: Number(e.target.value) || 0 })}
+            />
+          </label>
+          <label className="filter-bar__num">
+            Trim end (s)
+            <input
+              className="field-input"
+              type="number"
+              min={0}
+              value={slot.trimEnd ?? ''}
+              onChange={(e) => onChange({ trimEnd: e.target.value === '' ? null : Number(e.target.value) })}
+            />
+          </label>
+        </div>
+      ) : null}
+    </div>
+  )
 }

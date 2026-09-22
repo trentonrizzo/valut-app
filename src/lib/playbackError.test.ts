@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   classifyResolveFailure,
   classifyVideoElementError,
@@ -33,5 +36,14 @@ describe('video error classification', () => {
   it('does not force video/mp4 on QuickTime files', () => {
     expect(videoSourceType('IMG_3432.mov', 'video/mp4')).toBeUndefined()
     expect(videoSourceType('clip.mp4', 'video/mp4')).toBe('video/mp4')
+  })
+})
+
+describe('loading is not an error', () => {
+  it('viewer shows a loading state before signed URL resolution fails', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../pages/FullScreenMediaViewer.tsx'), 'utf8')
+    expect(src).toContain('fs-media-viewer__loading')
+    expect(src).toContain('loading')
+    expect(src).toMatch(/if \(loading \|\| \(!displayUrl && !failed\)\)/)
   })
 })
