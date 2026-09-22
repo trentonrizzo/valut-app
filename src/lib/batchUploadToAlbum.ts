@@ -67,7 +67,7 @@ function waitForJobs(ids: string[], onProgress: (p: BatchUploadProgress) => void
         fileName: current?.fileName ?? null,
         batchIndex: Math.min(ids.length, done.length + 1),
         batchTotal: ids.length,
-        etaText: current?.state === 'finalizing' ? 'Finalizing…' : current?.etaSeconds != null ? `~${current.etaSeconds}s left` : null,
+        etaText: current?.state === 'finalizing' ? 'Verifying…' : current?.etaSeconds != null ? `~${current.etaSeconds}s left` : null,
         currentFileIndex: Math.min(ids.length, done.length + 1),
         currentFilePercent: current?.state === 'complete' ? 100 : Math.min(99, current?.percent ?? 0),
       })

@@ -5,6 +5,7 @@ import { sendJson } from '../_json.js'
 import { getBucket, getR2Client } from './_s3.js'
 import { extractKeyFromStoredUrl, userOwnsStorageKey } from './_keys.js'
 import { assertFileOwnedByUser, userClientFromToken } from './_owned.js'
+import { responseContentType } from './_mime.js'
 
 const GET_EXPIRES = 15 * 60
 
@@ -52,14 +53,12 @@ export default async function handler(req, res) {
       return sendJson(res, 404, { ok: false, error: 'No storage object for this file' })
     }
 
-    const mime =
-      typeof row.mime_type === 'string' && row.mime_type.trim() && row.mime_type !== 'application/octet-stream'
-        ? row.mime_type.trim()
-        : null
+    const mime = responseContentType(row.mime_type, row.file_name)
     const command = new GetObjectCommand({
       Bucket: getBucket(),
       Key: key,
-      ...(mime ? { ResponseContentType: mime, ResponseContentDisposition: 'inline' } : {}),
+      ResponseContentDisposition: 'inline',
+      ...(mime ? { ResponseContentType: mime } : {}),
     })
     const signedUrl = await getSignedUrl(getR2Client(), command, { expiresIn: GET_EXPIRES })
 
@@ -73,7 +72,7 @@ export default async function handler(req, res) {
       chunkSize: row.encryption_chunk_size,
       wrappedDek: row.wrapped_dek,
       metadata: row.metadata_json,
-      mimeType: row.mime_type,
+      mimeType: mime || row.mime_type,
       fileName: row.file_name,
     })
   } catch (error) {

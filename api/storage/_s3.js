@@ -36,7 +36,7 @@ const CORS_RULE = {
   AllowedOrigins: ['*', 'https://vault-app-sigma.vercel.app', 'http://localhost:5173', 'http://localhost:3000'],
   AllowedMethods: ['GET', 'PUT', 'HEAD'],
   AllowedHeaders: ['*'],
-  ExposeHeaders: ['ETag', 'etag', 'Content-Length', 'Content-Type', 'x-amz-request-id'],
+  ExposeHeaders: ['ETag', 'etag', 'Content-Length', 'Content-Type', 'Content-Range', 'Accept-Ranges', 'x-amz-request-id'],
   MaxAgeSeconds: 86400,
 }
 

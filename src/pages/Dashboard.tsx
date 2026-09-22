@@ -4,7 +4,7 @@ import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
 import { buildAlbumsWithMeta, fetchAlbumsWithCounts } from '../lib/albumQueries'
-import { isAlbumGalleryFile, listAlbumMemberFiles } from '../lib/albumMembers'
+import { isAlbumGalleryFile, listAlbumMemberFiles, reconcileLegacyAlbumMemberships } from '../lib/albumMembers'
 import { albumViewAllowed, clearAlbumPassword, setAlbumPassword, verifyAlbumPassword } from '../lib/albumPin'
 import { addFilesToAlbum, moveFilesToAlbum, removeFilesFromAlbum } from '../lib/albumMembership'
 import { softDeleteFiles } from '../lib/trash'
@@ -192,6 +192,7 @@ export function Dashboard() {
   const refreshAlbums = useCallback(async () => {
     if (!user) return
 
+    await reconcileLegacyAlbumMemberships(user.id)
     const { data, error } = await fetchAlbumsWithCounts(user.id)
     if (error) {
       setFetchError(error)
@@ -482,6 +483,7 @@ export function Dashboard() {
     let cancelled = false
 
     ;(async () => {
+      await reconcileLegacyAlbumMemberships(user.id)
       const { data, error } = await fetchAlbumsWithCounts(user.id)
       if (cancelled) return
 

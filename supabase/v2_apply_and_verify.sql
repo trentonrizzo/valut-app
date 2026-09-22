@@ -5,6 +5,7 @@ BEGIN;
 
 \i supabase/migrations/20260921180000_v2_album_files_canonical.sql
 \i supabase/migrations/20260921190000_v2_trash_locks_tags_editor.sql
+\i supabase/migrations/20260922120000_v2_album_files_legacy_reconcile.sql
 
 DO $$
 BEGIN

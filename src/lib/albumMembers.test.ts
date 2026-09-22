@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { isAlbumGalleryFile, membershipKey } from './albumMembers'
+import { isAlbumGalleryFile, membershipKey, missingLegacyMemberships } from './albumMembers'
 import { addFilesToAlbum, moveFilesToAlbum, removeFilesFromAlbum } from './albumMembership'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -39,6 +39,8 @@ describe('canonical album_files membership', () => {
     const picker = readFileSync(join(root, 'src/components/albums/AlbumCoverPickerModal.tsx'), 'utf8')
     const members = readFileSync(join(root, 'src/lib/albumMembers.ts'), 'utf8')
     expect(members).toContain("from('album_files')")
+    expect(members).toContain("from('files')")
+    expect(members).toContain('reconcileLegacyAlbumMemberships')
     expect(dash).toContain('listAlbumMemberFiles')
     expect(viewer).toContain('listAlbumMemberFiles')
     expect(picker).toContain('listAlbumCoverCandidates')
@@ -52,5 +54,34 @@ describe('canonical album_files membership', () => {
     expect(src.toLowerCase()).not.toMatch(/drop column/)
     expect(src.toLowerCase()).not.toMatch(/drop table/)
     expect(src.toLowerCase()).not.toMatch(/drop column\s+.*album_id/)
+    const reconcile = readFileSync(join(root, 'supabase/migrations/20260922120000_v2_album_files_legacy_reconcile.sql'), 'utf8')
+    expect(reconcile).toContain('on conflict do nothing')
+    expect(reconcile.toLowerCase()).not.toMatch(/delete from/)
+    expect(reconcile.toLowerCase()).not.toMatch(/drop /)
+  })
+
+  it('legacy files.album_id without album_files becomes visible after backfill', () => {
+    const files = [
+      { id: 'f-recent', album_id: 'a1', user_id: 'u1' },
+      { id: 'f-old', album_id: 'a1', user_id: 'u1' },
+    ]
+    const existing = [{ album_id: 'a1', file_id: 'f-old' }]
+    const missing = missingLegacyMemberships(files, existing)
+    expect(missing).toEqual([{ album_id: 'a1', file_id: 'f-recent', user_id: 'u1' }])
+    const after = [...existing, ...missing]
+    const members = after.filter((m) => m.album_id === 'a1').map((m) => m.file_id)
+    expect(members.sort()).toEqual(['f-old', 'f-recent'])
+    expect(
+      isAlbumGalleryFile({ purpose: 'content', upload_status: 'ready', deleted_at: null }),
+    ).toBe(true)
+  })
+
+  it('does not overwrite extra many-to-many memberships', () => {
+    const files = [{ id: 'f1', album_id: 'a1', user_id: 'u1' }]
+    const existing = [
+      { album_id: 'a1', file_id: 'f1' },
+      { album_id: 'a2', file_id: 'f1' },
+    ]
+    expect(missingLegacyMemberships(files, existing)).toEqual([])
   })
 })

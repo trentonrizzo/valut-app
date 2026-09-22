@@ -193,7 +193,7 @@ export function displayProgress(job: {
     case 'complete':
       return { percent: 100, label: 'Complete', showEta: false, complete: true }
     case 'finalizing':
-      return { percent: Math.min(99, bytePct), label: 'Finalizing…', showEta: false, complete: false }
+      return { percent: Math.min(99, bytePct), label: 'Verifying…', showEta: false, complete: false }
     case 'preparing':
       return { percent: 0, label: 'Preparing', showEta: false, complete: false }
     case 'encrypting':

@@ -3,6 +3,7 @@ import { isVideoFileName } from './mediaTypes'
 import type { AlbumRow, AlbumWithMeta } from '../types/album'
 import type { FileRow } from '../types/media'
 import { albumViewAllowed } from './albumPin'
+import { isAlbumGalleryFile } from './albumMembers'
 
 export type FileRowForAlbumMeta = {
   id: string
@@ -86,14 +87,19 @@ export async function fetchAlbumsWithCounts(userId: string) {
     missing.map(async (album) => {
       const { data } = await supabase
         .from('album_files')
-        .select('file_id, files(id, file_name, file_url, is_encrypted, mime_type)')
+        .select('file_id, files(id, file_name, file_url, is_encrypted, mime_type, purpose, upload_status, deleted_at)')
         .eq('user_id', userId)
         .eq('album_id', album.id)
         .order('added_at', { ascending: false })
-        .limit(1)
-      const row = data?.[0] as { files?: FileRow | FileRow[] | null } | undefined
-      const file = Array.isArray(row?.files) ? row?.files[0] : row?.files
-      if (file) fallback.set(album.id, file)
+        .limit(12)
+      for (const row of data ?? []) {
+        const joined = (row as unknown as { files?: FileRow | FileRow[] | null }).files
+        const file = Array.isArray(joined) ? joined[0] : joined
+        if (file && isAlbumGalleryFile(file)) {
+          fallback.set(album.id, file)
+          break
+        }
+      }
     }),
   )
 

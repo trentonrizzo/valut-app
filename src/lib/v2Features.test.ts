@@ -121,4 +121,9 @@ describe('deleted items stay out of album galleries', () => {
   it('gallery predicate excludes deleted_at', () => {
     expect(isAlbumGalleryFile({ purpose: 'content', upload_status: 'ready', deleted_at: 'x' })).toBe(false)
   })
+
+  it('restored media with null deleted_at is visible again', () => {
+    expect(isAlbumGalleryFile({ purpose: 'content', upload_status: 'ready', deleted_at: null })).toBe(true)
+    expect(isAlbumGalleryFile({ purpose: 'content', upload_status: null, deleted_at: null })).toBe(true)
+  })
 })

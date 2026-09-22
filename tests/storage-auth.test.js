@@ -27,6 +27,25 @@ describe('unauthenticated upload URL', () => {
   })
 })
 
+describe('put-url auth validation', () => {
+  it('rejects put-url without a bearer token', async () => {
+    vi.resetModules()
+    const handler = (await import('../api/storage/put-url.js')).default
+    const req = { method: 'POST', headers: {}, body: { objectId: '1' } }
+    const res = {
+      statusCode: 0,
+      setHeader() {},
+      end(body) {
+        res.body = body
+      },
+      body: '',
+    }
+    await handler(req, res)
+    expect(res.statusCode).toBe(401)
+    expect(JSON.parse(res.body).error).toMatch(/Authorization/i)
+  })
+})
+
 describe('permanent delete ownership', () => {
   it('rejects unauthenticated delete', async () => {
     vi.resetModules()

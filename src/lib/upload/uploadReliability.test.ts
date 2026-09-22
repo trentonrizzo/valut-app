@@ -38,6 +38,13 @@ describe('photo simple upload success', () => {
     expect(plan.parts).toHaveLength(1)
     expect(normalizeUploadMime({ name: 'IMG_1001.JPG', type: 'image/jpeg' })).toBe('image/jpeg')
   })
+
+  it('uses a single PUT for a 449 KB png', () => {
+    const plan = planUpload(449 * 1024)
+    expect(plan.useMultipart).toBe(false)
+    expect(plan.parts).toHaveLength(1)
+    expect(normalizeUploadMime({ name: 'IMG_6792.png', type: 'image/png' })).toBe('image/png')
+  })
 })
 
 describe('small MP4 success path', () => {
@@ -46,7 +53,7 @@ describe('small MP4 success path', () => {
     expect(plan.useMultipart).toBe(false)
     expect(isVideoUpload({ name: 'clip.mp4', type: 'video/mp4' })).toBe(true)
     expect(displayProgress({ state: 'finalizing', size: 2_200_000, uploadedBytes: 2_200_000 }).label).toBe(
-      'Finalizing…',
+      'Verifying…',
     )
   })
 })
@@ -180,7 +187,7 @@ describe('progress does not report Complete before finalization', () => {
     expect(uploading.percent).toBeLessThan(100)
     expect(uploading.complete).toBe(false)
     expect(finalizing.percent).toBe(99)
-    expect(finalizing.label).toBe('Finalizing…')
+    expect(finalizing.label).toBe('Verifying…')
     expect(finalizing.showEta).toBe(false)
     expect(done.percent).toBe(100)
     expect(done.label).toBe('Complete')
@@ -296,7 +303,8 @@ describe('18MB multipart MOV regression', () => {
     expect(shouldExposeInLibrary({ upload_status: 'ready' })).toBe(true)
     expect(shouldExposeInLibrary({ upload_status: null })).toBe(true)
     const q = readFileSync(join(root, 'lib/mediaQueries.ts'), 'utf8')
-    expect(q).toContain("eq('upload_status', 'ready')")
+    expect(q).toContain('upload_status.eq.ready')
+    expect(q).toContain('upload_status.is.null')
   })
 
   it('K: 100-file queue accepted with no count cap', () => {

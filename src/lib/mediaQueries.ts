@@ -3,6 +3,7 @@ import { isVideoFileName } from './mediaTypes'
 import type { FileRow, MediaFilters, MediaSort, PageCursor } from '../types/media'
 import { PAGE_SIZE } from '../types/media'
 import { isV11SchemaReady, isV2SchemaReady } from './schemaGuard'
+import { isAlbumGalleryFile } from './albumMembers'
 
 function sanitizeSearch(raw: string): string {
   return raw.trim().replace(/[%(),]/g, ' ').replace(/\s+/g, ' ').slice(0, 80)
@@ -76,7 +77,17 @@ export async function listMediaPage(opts: {
         .eq('user_id', opts.userId)
         .eq('album_id', f.albumId)
       if (error) throw new Error(error.message)
-      albumFileIds = (data ?? []).map((r) => r.file_id)
+      const { data: legacyAlbum } = await supabase
+        .from('files')
+        .select('id')
+        .eq('user_id', opts.userId)
+        .eq('album_id', f.albumId)
+      albumFileIds = [
+        ...new Set([
+          ...(data ?? []).map((r) => r.file_id),
+          ...((legacyAlbum ?? []) as { id: string }[]).map((r) => r.id),
+        ]),
+      ]
       if (albumFileIds.length === 0) return { rows: [], nextCursor: null }
     }
   }
@@ -109,8 +120,16 @@ export async function listMediaPage(opts: {
 
   let q = supabase.from('files').select('*').eq('user_id', opts.userId)
 
-  q = q.or('purpose.eq.content,purpose.is.null')
-  if (v11) q = q.eq('upload_status', 'ready')
+  q = q.or(
+    v11
+      ? [
+          'and(purpose.eq.content,upload_status.eq.ready)',
+          'and(purpose.is.null,upload_status.eq.ready)',
+          'and(purpose.eq.content,upload_status.is.null)',
+          'and(purpose.is.null,upload_status.is.null)',
+        ].join(',')
+      : 'purpose.eq.content,purpose.is.null',
+  )
   if (await isV2SchemaReady()) q = q.is('deleted_at', null)
   if (!v11 && f.albumId) q = q.eq('album_id', f.albumId)
 
@@ -252,21 +271,30 @@ export async function fetchAlbumPreviewFile(userId: string, albumId: string, cov
       .eq('user_id', userId)
       .maybeSingle()
     if (error) throw new Error(error.message)
-    if (data) return data as FileRow
+    if (data && isAlbumGalleryFile(data as FileRow)) return data as FileRow
   }
   const { data: membership, error: mErr } = await supabase
     .from('album_files')
-    .select('file_id')
+    .select('file_id, files(*)')
     .eq('user_id', userId)
     .eq('album_id', albumId)
     .order('added_at', { ascending: false })
-    .limit(1)
+    .limit(12)
   if (mErr) throw new Error(mErr.message)
-  const fid = membership?.[0]?.file_id
-  if (!fid) return null
-  const { data, error } = await supabase.from('files').select('*').eq('id', fid).maybeSingle()
-  if (error) throw new Error(error.message)
-  return (data as FileRow) ?? null
+  for (const raw of membership ?? []) {
+    const joined = (raw as unknown as { files?: FileRow | FileRow[] | null }).files
+    const file = Array.isArray(joined) ? joined[0] : joined
+    if (file && isAlbumGalleryFile(file)) return file
+  }
+  const { data: legacy } = await supabase
+    .from('files')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('album_id', albumId)
+    .or('upload_status.eq.ready,upload_status.is.null')
+    .order('created_at', { ascending: false })
+    .limit(12)
+  return ((legacy as FileRow[]) ?? []).find((f) => isAlbumGalleryFile(f)) ?? null
 }
 
 export function isVideoRow(f: Pick<FileRow, 'file_name' | 'mime_type'>): boolean {

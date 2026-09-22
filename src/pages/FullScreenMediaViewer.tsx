@@ -8,6 +8,12 @@ import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
 import { isAlbumGalleryFile, listAlbumMemberFiles } from '../lib/albumMembers'
 import { classifyFileKind, fileKindLabel } from '../lib/fileKind'
 import { formatBytes } from '../lib/formatBytes'
+import {
+  classifyResolveFailure,
+  classifyVideoElementError,
+  playbackFailureMessage,
+  type PlaybackFailureKind,
+} from '../lib/playbackError'
 
 type FileRow = {
   id: string
@@ -79,11 +85,10 @@ function SlideVideo({
     file.id,
   )
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [playFailed, setPlayFailed] = useState(false)
-  const mime = file.mime_type && file.mime_type.startsWith('video/') ? file.mime_type : undefined
+  const [playFailure, setPlayFailure] = useState<PlaybackFailureKind | null>(null)
 
   useEffect(() => {
-    setPlayFailed(false)
+    setPlayFailure(null)
   }, [displayUrl])
 
   useEffect(() => {
@@ -109,12 +114,16 @@ function SlideVideo({
   }, [isActive, displayUrl, loop])
 
   if (failed || !displayUrl) {
-    return <div className="fs-media-viewer__failed" aria-label="Could not load video" />
-  }
-  if (playFailed) {
     return (
       <div className="fs-media-viewer__failed" role="status">
-        This device cannot play this video format. The original is still stored.
+        {playbackFailureMessage(classifyResolveFailure(new Error('signed-get')))}
+      </div>
+    )
+  }
+  if (playFailure) {
+    return (
+      <div className="fs-media-viewer__failed" role="status">
+        {playbackFailureMessage(playFailure)}
       </div>
     )
   }
@@ -128,10 +137,9 @@ function SlideVideo({
         playsInline
         preload="metadata"
         loop={loop}
-        onError={() => setPlayFailed(true)}
-      >
-        <source src={displayUrl} type={mime || 'video/mp4'} />
-      </video>
+        src={displayUrl}
+        onError={() => setPlayFailure(classifyVideoElementError(videoRef.current))}
+      />
     </div>
   )
 }
