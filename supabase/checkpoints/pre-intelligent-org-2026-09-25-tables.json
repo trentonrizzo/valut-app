@@ -1,0 +1,21 @@
+{
+  "captured_at": "2026-09-25",
+  "project": "zywsjgwizodrxhpxucwn",
+  "tables": [
+    "album_files",
+    "album_secrets",
+    "album_tags",
+    "albums",
+    "editor_projects",
+    "file_tags",
+    "files",
+    "items",
+    "media_analysis",
+    "person_group_media",
+    "person_groups",
+    "profiles",
+    "storage_orphans",
+    "tags",
+    "vault_secrets"
+  ]
+}
