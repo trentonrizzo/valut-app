@@ -102,6 +102,12 @@ export interface Database {
           stored_size_bytes: number | null
           storage_integrity: string | null
           membership_snapshot: unknown
+          original_filename: string | null
+          source_url: string | null
+          description: string | null
+          content_hash: string | null
+          hash_algo: string | null
+          hash_status: string | null
         }
         Insert: {
           id?: string
@@ -135,6 +141,12 @@ export interface Database {
           stored_size_bytes?: number | null
           storage_integrity?: string | null
           membership_snapshot?: unknown
+          original_filename?: string | null
+          source_url?: string | null
+          description?: string | null
+          content_hash?: string | null
+          hash_algo?: string | null
+          hash_status?: string | null
         }
         Update: {
           id?: string
@@ -168,6 +180,12 @@ export interface Database {
           stored_size_bytes?: number | null
           storage_integrity?: string | null
           membership_snapshot?: unknown
+          original_filename?: string | null
+          source_url?: string | null
+          description?: string | null
+          content_hash?: string | null
+          hash_algo?: string | null
+          hash_status?: string | null
         }
         Relationships: [
           {
@@ -342,6 +360,117 @@ export interface Database {
         }
         Relationships: []
       }
+      media_analysis: {
+        Row: {
+          id: string
+          user_id: string
+          file_id: string
+          analysis_version: string
+          provider: string | null
+          model: string | null
+          status: string
+          description: string | null
+          attributes_json: Record<string, unknown>
+          people_count: number | null
+          sample_info_json: Record<string, unknown>
+          embedding_ref: string | null
+          confidence: number | null
+          error: string | null
+          content_hash_at_analysis: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          file_id: string
+          analysis_version?: string
+          provider?: string | null
+          model?: string | null
+          status?: string
+          description?: string | null
+          attributes_json?: Record<string, unknown>
+          people_count?: number | null
+          sample_info_json?: Record<string, unknown>
+          embedding_ref?: string | null
+          confidence?: number | null
+          error?: string | null
+          content_hash_at_analysis?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          file_id?: string
+          analysis_version?: string
+          provider?: string | null
+          model?: string | null
+          status?: string
+          description?: string | null
+          attributes_json?: Record<string, unknown>
+          people_count?: number | null
+          sample_info_json?: Record<string, unknown>
+          embedding_ref?: string | null
+          confidence?: number | null
+          error?: string | null
+          content_hash_at_analysis?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      person_groups: {
+        Row: {
+          id: string
+          user_id: string
+          label: string
+          sort_index: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          label: string
+          sort_index?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          label?: string
+          sort_index?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      person_group_media: {
+        Row: {
+          person_group_id: string
+          file_id: string
+          user_id: string
+          confidence: number | null
+          created_at: string
+        }
+        Insert: {
+          person_group_id: string
+          file_id: string
+          user_id: string
+          confidence?: number | null
+          created_at?: string
+        }
+        Update: {
+          person_group_id?: string
+          file_id?: string
+          user_id?: string
+          confidence?: number | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       items: {
         Row: {
           id: string
@@ -383,7 +512,39 @@ export interface Database {
       }
       album_content_stats: {
         Args: Record<string, never>
-        Returns: { album_id: string; item_count: number; total_bytes: number }[]
+        Returns: {
+          album_id: string
+          item_count: number
+          total_bytes: number
+          photo_items: number
+          photo_bytes: number
+          video_items: number
+          video_bytes: number
+        }[]
+      }
+      vault_storage_stats: {
+        Args: Record<string, never>
+        Returns: {
+          total_items: number
+          total_bytes: number
+          photo_items: number
+          photo_bytes: number
+          video_items: number
+          video_bytes: number
+        }[]
+      }
+      duplicate_content_groups: {
+        Args: Record<string, never>
+        Returns: {
+          content_hash: string
+          file_count: number
+          total_bytes: number
+          file_ids: string[]
+        }[]
+      }
+      tag_file_counts: {
+        Args: Record<string, never>
+        Returns: { tag_id: string; file_count: number }[]
       }
       album_ids_with_all_tags: {
         Args: { p_tag_ids: string[] }

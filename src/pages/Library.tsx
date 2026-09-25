@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { DEFAULT_MEDIA_FILTERS } from '../types/media'
@@ -35,6 +35,7 @@ import { FilterBar } from '../components/library/FilterBar'
 import { BulkActionBar } from '../components/library/BulkActionBar'
 import { TagPickerModal } from '../components/library/TagPickerModal'
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
+import { MediaDetailsSheet } from '../components/files/MediaDetailsSheet'
 import { UploadQueueOverlay } from '../components/UploadQueueOverlay'
 import { filesFromInput, logUploadSelection, selectionFailureReason } from '../lib/upload/selectFiles'
 
@@ -42,7 +43,12 @@ export function Library() {
   const { user, session } = useAuth()
   const { showToast } = useToast()
   const navigate = useNavigate()
-  const [filters, setFilters] = useState(DEFAULT_MEDIA_FILTERS)
+  const [params] = useSearchParams()
+  const [filters, setFilters] = useState(() => ({
+    ...DEFAULT_MEDIA_FILTERS,
+    favorite: params.get('favorite') === 'yes' ? ('yes' as const) : DEFAULT_MEDIA_FILTERS.favorite,
+  }))
+  const [detailsFile, setDetailsFile] = useState<FileRow | null>(null)
   const [rows, setRows] = useState<FileRow[]>([])
   const [cursor, setCursor] = useState<{ ts: string | null; id: string; num: number | null } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -210,6 +216,11 @@ export function Library() {
           onAddTags={() => setTagModal('add')}
           onRemoveTags={() => setTagModal('remove')}
           onDownload={() => void downloadSelected()}
+          onDetails={() => {
+            const id = [...selected][0]
+            const row = rows.find((r) => r.id === id)
+            if (row) setDetailsFile(row)
+          }}
         />
         {loading && rows.length === 0 ? (
           <div className="vault-loading">Loading library…</div>
@@ -307,6 +318,7 @@ export function Library() {
         onCancelQueued={cancelQueued}
         onDismissCompleted={dismissCompleted}
       />
+      <MediaDetailsSheet file={detailsFile} onClose={() => setDetailsFile(null)} />
     </div>
   )
 }

@@ -10,10 +10,10 @@ type Props = {
 }
 
 const SORTS: { id: MediaSort; label: string }[] = [
-  { id: 'newest_upload', label: 'Newest' },
-  { id: 'oldest_upload', label: 'Oldest' },
-  { id: 'newest_captured', label: 'Newest captured' },
-  { id: 'oldest_captured', label: 'Oldest captured' },
+  { id: 'newest_upload', label: 'Newest import' },
+  { id: 'oldest_upload', label: 'Oldest import' },
+  { id: 'newest_captured', label: 'Newest created' },
+  { id: 'oldest_captured', label: 'Oldest created' },
   { id: 'largest', label: 'Largest' },
   { id: 'smallest', label: 'Smallest' },
   { id: 'longest', label: 'Longest' },

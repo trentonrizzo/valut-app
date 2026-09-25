@@ -14,6 +14,8 @@ import { Upload } from './pages/Upload'
 import { Library } from './pages/Library'
 import { RecentlyDeleted } from './pages/RecentlyDeleted'
 import { Editor } from './pages/Editor'
+import { Favorites } from './pages/Favorites'
+import { Duplicates } from './pages/Duplicates'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { BootScreen } from './components/BootScreen'
 import { supabaseConfigError } from './lib/supabase'
@@ -55,6 +57,8 @@ export default function App() {
               <Route path="library/media/:fileId" element={<FullScreenMediaViewer />} />
               <Route path="upload" element={<Upload />} />
               <Route path="editor" element={<Editor />} />
+              <Route path="favorites" element={<Favorites />} />
+              <Route path="duplicates" element={<Duplicates />} />
               <Route path="deleted" element={<RecentlyDeleted />} />
               <Route path="settings" element={<Settings />} />
             </Route>

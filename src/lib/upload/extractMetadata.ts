@@ -3,6 +3,8 @@
  * Video poster/metadata must never block upload finalization.
  */
 import { isImageUpload, isVideoUpload, normalizeUploadMime } from './strategy'
+import { extractJpegCaptureDate } from './exifCaptureDate'
+import { extractVideoCaptureDate } from './videoCaptureDate'
 
 export type ExtractedMeta = {
   width: number | null
@@ -43,7 +45,8 @@ export async function extractMediaMetadata(file: File): Promise<ExtractedMeta> {
   try {
     if (isImageUpload(file)) {
       const dim = await withTimeout(imageSize(file), META_TIMEOUT_MS, { width: null, height: null })
-      return { ...base, ...dim }
+      const capturedAt = await withTimeout(extractJpegCaptureDate(file), META_TIMEOUT_MS, null)
+      return { ...base, ...dim, capturedAt }
     }
     if (isVideoUpload(file)) {
       const v = await withTimeout(videoMeta(file), META_TIMEOUT_MS, {
@@ -51,7 +54,8 @@ export async function extractMediaMetadata(file: File): Promise<ExtractedMeta> {
         height: null,
         durationMs: null,
       })
-      return { ...base, ...v }
+      const capturedAt = await withTimeout(extractVideoCaptureDate(file), META_TIMEOUT_MS, null)
+      return { ...base, ...v, capturedAt }
     }
     return base
   } catch {

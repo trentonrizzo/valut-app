@@ -26,6 +26,7 @@ import {
 import { deleteJob, listJobs, saveJob, type PersistedUploadJob, type UploadUiState } from './queueStore'
 import { fileConcurrency, isIosDevice, partConcurrency, putWithRetry } from './multipartConfig'
 import { extractMediaMetadata, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
+import { sha256HexOfFileBestEffort } from './contentHash'
 import {
   canCatalogReady,
   canFinalizeWithoutFile,
@@ -131,14 +132,27 @@ function noteProgress(job: PersistedUploadJob, uploadedBytes: number, now = Date
   const prev = progressMark.get(job.id)
   let ema = speedEma.get(job.id) ?? 0
   if (prev && now > prev.t && uploadedBytes >= prev.bytes) {
-    const inst = ((uploadedBytes - prev.bytes) * 1000) / (now - prev.t)
-    ema = ema === 0 ? inst : ema * 0.78 + inst * 0.22
+    const dt = now - prev.t
+    const db = uploadedBytes - prev.bytes
+    // Ignore tiny/noisy samples that make ETA jump between ~2s and ~30s.
+    if (dt >= 400 && db >= 32 * 1024) {
+      const inst = (db * 1000) / dt
+      ema = ema === 0 ? inst : ema * 0.9 + inst * 0.1
+    }
   }
   progressMark.set(job.id, { t: now, bytes: uploadedBytes })
   speedEma.set(job.id, ema)
   const remain = Math.max(0, job.size - uploadedBytes)
   const ui = displayProgress(job)
-  const etaSeconds = ui.showEta && ema > 500 ? Math.round(remain / ema) : null
+  const samplesOk = uploadedBytes >= Math.min(job.size * 0.08, 1.5 * 1024 * 1024)
+  const rawEta = ui.showEta && samplesOk && ema > 8_000 ? Math.round(remain / ema) : null
+  const prevEta = live.get(job.id)?.etaSeconds ?? null
+  const etaSeconds =
+    rawEta == null
+      ? null
+      : prevEta == null
+        ? rawEta
+        : Math.round(prevEta * 0.72 + rawEta * 0.28)
   live.set(job.id, toLive(job, { speedBps: ema, etaSeconds, percent: ui.percent }))
   emit()
 }
@@ -403,37 +417,42 @@ async function runJob(id: string) {
 
   try {
     if (file) {
-      if (isImageUpload(file)) {
-        try {
-          const meta = await extractMediaMetadata(file)
-          logUploadSelection('metadata', {
-            name: file.name,
-            width: meta.width,
-            height: meta.height,
-            durationMs: meta.durationMs,
-            mime: meta.mime,
-          })
-          job = {
-            ...job,
-            width: job.width ?? meta.width,
-            height: job.height ?? meta.height,
-            durationMs: job.durationMs ?? meta.durationMs,
-            capturedAt: job.capturedAt ?? meta.capturedAt,
-            type: normalizeUploadMime(file) || meta.mime || job.type,
-          }
-          await persist(job)
-        } catch (metaErr) {
-          logUploadSelection('metadata-failed', {
-            name: file.name,
-            error: metaErr instanceof Error ? metaErr.message : String(metaErr),
-          })
-        }
-      } else {
-        logUploadSelection('metadata-skipped', {
+      try {
+        const meta = await extractMediaMetadata(file)
+        logUploadSelection('metadata', {
           name: file.name,
-          type: job.type,
-          size: job.size,
+          width: meta.width,
+          height: meta.height,
+          durationMs: meta.durationMs,
+          capturedAt: meta.capturedAt,
+          mime: meta.mime,
         })
+        job = {
+          ...job,
+          width: job.width ?? meta.width,
+          height: job.height ?? meta.height,
+          durationMs: job.durationMs ?? meta.durationMs,
+          capturedAt: job.capturedAt ?? meta.capturedAt,
+          type: normalizeUploadMime(file) || meta.mime || job.type,
+          originalFilename: job.originalFilename ?? file.name,
+        }
+        await persist(job)
+      } catch (metaErr) {
+        logUploadSelection('metadata-failed', {
+          name: file.name,
+          error: metaErr instanceof Error ? metaErr.message : String(metaErr),
+        })
+      }
+      if (!job.contentHash && file.size > 0 && file.size <= 512 * 1024 * 1024) {
+        try {
+          const hash = await sha256HexOfFileBestEffort(file)
+          if (hash) {
+            job = { ...job, contentHash: hash, hashAlgo: 'sha256' }
+            await persist(job)
+          }
+        } catch {
+          /* hashing is best-effort; never blocks upload */
+        }
       }
     }
 
@@ -571,6 +590,24 @@ async function runJob(id: string) {
   }
 }
 
+async function recordOrphanSafe(
+  authFetch: ReturnType<typeof createAuthFetch>,
+  job: PersistedUploadJob,
+  error: string,
+) {
+  try {
+    await apiRecordOrphan(authFetch, {
+      storageKey: job.storageKey!,
+      originalName: job.fileName,
+      fileSizeBytes: job.size,
+      uploadId: job.uploadId ?? undefined,
+      error,
+    })
+  } catch {
+    /* still fail the job */
+  }
+}
+
 async function finalizeCatalog(
   job: PersistedUploadJob,
   authFetch: ReturnType<typeof createAuthFetch>,
@@ -603,22 +640,54 @@ async function finalizeCatalog(
     metadata_json: {
       fileNonce: job.fileNonceB64,
     },
+    original_filename: job.originalFilename ?? job.fileName,
+    checksum: job.contentHash ?? null,
+    content_hash: job.contentHash ?? null,
+    hash_algo: job.hashAlgo ?? (job.contentHash ? 'sha256' : null),
+    hash_status: job.contentHash ? 'ready' : 'pending',
   }
 
   const { error: insErr } = await supabase.from('files').upsert(insert, { onConflict: 'id', ignoreDuplicates: true })
   if (insErr) {
-    try {
-      await apiRecordOrphan(authFetch, {
-        storageKey: job.storageKey!,
-        originalName: job.fileName,
-        fileSizeBytes: job.size,
-        uploadId: job.uploadId ?? undefined,
-        error: insErr.message,
-      })
-    } catch {
-      /* still fail the job */
+    if (/content_hash|original_filename|hash_algo|hash_status/i.test(insErr.message)) {
+      const legacy = {
+        id: insert.id,
+        user_id: insert.user_id,
+        album_id: insert.album_id,
+        file_name: insert.file_name,
+        file_url: insert.file_url,
+        file_size_bytes: insert.file_size_bytes,
+        stored_size_bytes: insert.stored_size_bytes,
+        purpose: insert.purpose,
+        is_encrypted: insert.is_encrypted,
+        mime_type: insert.mime_type,
+        storage_key: insert.storage_key,
+        storage_provider: insert.storage_provider,
+        upload_status: insert.upload_status,
+        width: insert.width,
+        height: insert.height,
+        duration_ms: insert.duration_ms,
+        captured_at: insert.captured_at,
+        favorite: insert.favorite,
+        thumbnail_key: insert.thumbnail_key,
+        poster_key: insert.poster_key,
+        encryption_version: insert.encryption_version,
+        wrapped_dek: insert.wrapped_dek,
+        encryption_chunk_size: insert.encryption_chunk_size,
+        metadata_json: insert.metadata_json,
+        checksum: insert.checksum,
+      }
+      const { error: legacyErr } = await supabase.from('files').upsert(legacy, { onConflict: 'id', ignoreDuplicates: true })
+      if (!legacyErr) {
+        /* cataloged with legacy columns */
+      } else {
+        await recordOrphanSafe(authFetch, job, legacyErr.message)
+        throw codedError('ERR_DB_INSERT', `Stored in R2 but catalog insert failed: ${legacyErr.message}`)
+      }
+    } else {
+      await recordOrphanSafe(authFetch, job, insErr.message)
+      throw codedError('ERR_DB_INSERT', `Stored in R2 but catalog insert failed: ${insErr.message}`)
     }
-    throw codedError('ERR_DB_INSERT', `Stored in R2 but catalog insert failed: ${insErr.message}`)
   }
 
   if (job.albumId) {

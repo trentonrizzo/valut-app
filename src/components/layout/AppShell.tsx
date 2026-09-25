@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom'
 import { BottomNav } from './BottomNav'
+import { VaultAiAgent } from '../VaultAiAgent'
 
 export function AppShell() {
   const { pathname } = useLocation()
@@ -12,6 +13,7 @@ export function AppShell() {
         <Outlet />
       </div>
       {!hideBottomNav ? <BottomNav /> : null}
+      <VaultAiAgent />
     </div>
   )
 }

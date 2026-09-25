@@ -15,6 +15,17 @@ export async function listTags(userId: string) {
   return data ?? []
 }
 
+export async function listTagsWithCounts(userId: string) {
+  const tags = await listTags(userId)
+  const { data, error } = await supabase.rpc('tag_file_counts')
+  if (error) return tags.map((t) => ({ ...t, file_count: null as number | null }))
+  const map = new Map<string, number>()
+  for (const row of (data as { tag_id: string; file_count: number }[] | null) ?? []) {
+    map.set(String(row.tag_id), Number(row.file_count))
+  }
+  return tags.map((t) => ({ ...t, file_count: map.get(t.id) ?? 0 }))
+}
+
 export async function createTag(userId: string, rawName: string) {
   const { name, name_normalized } = normalizeTagName(rawName)
   if (!name) throw new Error('Enter a tag name.')

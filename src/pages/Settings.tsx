@@ -5,10 +5,12 @@ import { useVault } from '../context/useVault'
 import { ConfirmLogoutModal } from '../components/ConfirmLogoutModal'
 import { clearVaultPin, setVaultPin, vaultPinIsSet, verifyVaultPin } from '../lib/vaultPin'
 import { Link } from 'react-router-dom'
+import { fetchVaultStorageStats, formatStorageLine, type VaultStorageStats } from '../lib/storageStats'
+import { backfillCaptureDatesBatch, hashMissingBatch } from '../lib/mediaIndexBackfill'
 
 export function Settings() {
-  const { user, signOut } = useAuth()
-  const { status, setupVault, unlockVault, recoveryJustCreated, clearRecoveryDisplay } = useVault()
+  const { user, session, signOut } = useAuth()
+  const { status, setupVault, unlockVault, recoveryJustCreated, clearRecoveryDisplay, masterKey } = useVault()
   const navigate = useNavigate()
   const [logoutOpen, setLogoutOpen] = useState(false)
   const [recoveryInput, setRecoveryInput] = useState('')
@@ -16,9 +18,14 @@ export function Settings() {
   const [msg, setMsg] = useState<string | null>(null)
   const [pin, setPin] = useState('')
   const [pinSet, setPinSet] = useState(false)
+  const [storage, setStorage] = useState<VaultStorageStats | null>(null)
 
   useEffect(() => {
     void vaultPinIsSet().then(setPinSet).catch(() => setPinSet(false))
+  }, [])
+
+  useEffect(() => {
+    void fetchVaultStorageStats().then(setStorage).catch(() => setStorage(null))
   }, [])
 
   async function handleConfirmLogout() {
@@ -159,12 +166,114 @@ export function Settings() {
         </section>
 
         <section className="settings-section">
-          <h2 className="settings-section__heading">Storage</h2>
-          <div className="settings-section__card">
-            <p className="settings-placeholder">Storage connection uses signed R2 URLs. Multipart verification uses server ListParts + HeadObject, so Safari ETag headers are not required.</p>
+          <h2 className="settings-section__heading">Library</h2>
+          <div className="settings-section__card settings-section__card--stack">
+            <Link className="btn btn--outline btn--block" to="/favorites">
+              Favorites
+            </Link>
+            <Link className="btn btn--outline btn--block" to="/duplicates">
+              Duplicates
+            </Link>
             <Link className="btn btn--outline btn--block" to="/deleted">
               Recently Deleted
             </Link>
+            <button
+              type="button"
+              className="btn btn--ghost btn--block"
+              disabled={busy || !user || !session?.access_token}
+              onClick={async () => {
+                if (!user || !session?.access_token) return
+                setBusy(true)
+                setMsg(null)
+                try {
+                  let cursorCreatedAt: string | null = null
+                  let cursorId: string | null = null
+                  let hashed = 0
+                  let failed = 0
+                  let skipped = 0
+                  for (let i = 0; i < 30; i++) {
+                    const batch = await hashMissingBatch({
+                      userId: user.id,
+                      accessToken: session.access_token,
+                      masterKey,
+                      limit: 3,
+                      cursorCreatedAt,
+                      cursorId,
+                    })
+                    hashed += batch.hashed
+                    failed += batch.failed
+                    skipped += batch.skipped
+                    cursorCreatedAt = batch.nextCursorCreatedAt
+                    cursorId = batch.nextCursorId
+                    if (batch.done) break
+                  }
+                  setMsg(
+                    `Hash index: ${hashed} hashed, ${skipped} skipped, ${failed} failed (originals untouched). Open Duplicates as indexing proceeds.`,
+                  )
+                  void fetchVaultStorageStats().then(setStorage).catch(() => {})
+                } catch (e) {
+                  setMsg(e instanceof Error ? e.message : 'Hash indexing failed')
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              Hash existing media (safe batch)
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--block"
+              disabled={busy || !user || !session?.access_token}
+              onClick={async () => {
+                if (!user || !session?.access_token) return
+                setBusy(true)
+                setMsg(null)
+                try {
+                  let cursorCreatedAt: string | null = null
+                  let cursorId: string | null = null
+                  let updated = 0
+                  let skipped = 0
+                  let failed = 0
+                  for (let i = 0; i < 20; i++) {
+                    const batch = await backfillCaptureDatesBatch({
+                      userId: user.id,
+                      accessToken: session.access_token,
+                      masterKey,
+                      limit: 2,
+                      cursorCreatedAt,
+                      cursorId,
+                    })
+                    updated += batch.updated
+                    skipped += batch.skipped
+                    failed += batch.failed
+                    cursorCreatedAt = batch.nextCursorCreatedAt
+                    cursorId = batch.nextCursorId
+                    if (batch.done) break
+                  }
+                  setMsg(
+                    `Capture dates: ${updated} recovered, ${skipped} unknown/skipped, ${failed} failed (never guessed).`,
+                  )
+                } catch (e) {
+                  setMsg(e instanceof Error ? e.message : 'Capture backfill failed')
+                } finally {
+                  setBusy(false)
+                }
+              }}
+            >
+              Recover capture dates (safe batch)
+            </button>
+            {msg ? <p className="settings-placeholder">{msg}</p> : null}
+          </div>
+        </section>
+
+        <section className="settings-section">
+          <h2 className="settings-section__heading">Storage</h2>
+          <div className="settings-section__card">
+            <p className="settings-row__value">{formatStorageLine(storage)}</p>
+            <p className="settings-placeholder">
+              Totals count each physical item once. Album sizes elsewhere are referenced membership totals and may
+              overlap when the same item is in multiple albums. Uploads still use signed R2 URLs with verify-before-catalog.
+            </p>
           </div>
         </section>
 

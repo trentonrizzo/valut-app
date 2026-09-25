@@ -16,8 +16,10 @@ import {
   type EditorProjectPayload,
   type EditorSlot,
 } from '../lib/editor/projects'
+import { exportEditorCollageToVault } from '../lib/editor/exportToVault'
 import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
+import { useVault } from '../context/useVault'
 
 const LAYOUTS: { id: EditorProjectPayload['layout']; label: string }[] = [
   { id: '1', label: '1' },
@@ -28,7 +30,8 @@ const LAYOUTS: { id: EditorProjectPayload['layout']; label: string }[] = [
 ]
 
 export function Editor() {
-  const { user } = useAuth()
+  const { user, session } = useAuth()
+  const { masterKey } = useVault()
   const { showToast } = useToast()
   const [projects, setProjects] = useState<EditorProject[]>([])
   const [title, setTitle] = useState('Untitled')
@@ -39,6 +42,7 @@ export function Editor() {
   const [slotIndex, setSlotIndex] = useState<number | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [fileById, setFileById] = useState<Record<string, FileRow>>({})
+  const [exporting, setExporting] = useState(false)
   const exportCaps = useMemo(() => exportSupported(), [])
 
   useEffect(() => {
@@ -107,6 +111,30 @@ export function Editor() {
     }
   }
 
+  async function exportNew() {
+    if (!user || !session?.access_token) return
+    setExporting(true)
+    try {
+      const result = await exportEditorCollageToVault({
+        title,
+        payload,
+        accessToken: session.access_token,
+        albumId: null,
+        fileById,
+        masterKey,
+      })
+      if (!result.ok) {
+        showToast(result.error, 'error')
+        return
+      }
+      showToast(`Export queued as new file “${result.fileName}”. Originals untouched; ready after verify.`)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Export failed', 'error')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   function chooseFile(file: FileRow) {
     if (slotIndex == null) return
     const kind = classifyFileKind({ name: file.file_name, mime_type: file.mime_type })
@@ -130,6 +158,14 @@ export function Editor() {
           </div>
           <button type="button" className="btn btn--primary" onClick={() => void save()}>
             Save project
+          </button>
+          <button
+            type="button"
+            className="btn btn--outline"
+            disabled={exporting || !exportCaps.canvas}
+            onClick={() => void exportNew()}
+          >
+            {exporting ? 'Exporting…' : 'Export as new'}
           </button>
         </div>
         <div className="library-controls__row">
@@ -217,10 +253,10 @@ export function Editor() {
           </div>
         ) : null}
         <p className="dashboard__subtitle">
-          Export:{' '}
+          Export as new creates a JPEG collage via the normal upload + verify path. Originals are never overwritten.
           {exportCaps.mediaRecorder
-            ? 'Save the project instead of forcing a 4K render. A future export will create a new Vault file without changing originals.'
-            : 'Export is unavailable on this device. The project stays editable and originals are safe.'}
+            ? ' Video collage export is not enabled yet — save the project instead.'
+            : ' MediaRecorder unavailable; image export still works when canvas is available.'}
         </p>
         <h2 className="settings-section__heading">Saved projects</h2>
         <ul className="deleted-list">

@@ -41,6 +41,9 @@ export type PersistedUploadJob = {
   height: number | null
   durationMs: number | null
   capturedAt: string | null
+  contentHash?: string | null
+  hashAlgo?: string | null
+  originalFilename?: string | null
   createdAt: number
   r2Complete?: boolean
   r2Verified?: boolean

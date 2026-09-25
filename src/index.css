@@ -3172,3 +3172,140 @@ button {
 }
 
 
+
+/* Major pass: denser gallery, details, AI, duplicates */
+.vault-grid--gallery {
+  gap: 1px;
+}
+
+.media-details {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0 0 1rem;
+}
+
+.media-details__row {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 0.5rem;
+  font-size: 0.86rem;
+}
+
+.media-details__row dt {
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
+}
+
+.media-details__row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sheet--details {
+  max-height: min(86vh, 720px);
+  overflow: auto;
+}
+
+.dup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.dup-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dup-card__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.dup-card__hash {
+  margin: 0.35rem 0 0.55rem;
+  font-size: 0.75rem;
+  opacity: 0.55;
+  font-family: ui-monospace, monospace;
+}
+
+.dup-card__files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.dup-card__meta {
+  opacity: 0.55;
+}
+
+.settings-section__card--stack {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.vault-ai-fab {
+  position: fixed;
+  right: max(0.85rem, env(safe-area-inset-right));
+  bottom: calc(5.4rem + env(safe-area-inset-bottom, 0px));
+  z-index: 240;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(28, 28, 30, 0.92);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.vault-ai-chat {
+  display: grid;
+  gap: 0.55rem;
+  max-height: 42vh;
+  overflow: auto;
+  margin-bottom: 0.75rem;
+}
+
+.vault-ai-msg {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+}
+
+.vault-ai-msg--assistant {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.vault-ai-msg--user {
+  background: rgba(96, 165, 250, 0.16);
+}
+
+.vault-ai-compose {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .vault-ai-compose {
+    grid-template-columns: 1fr 1fr;
+  }
+  .vault-ai-compose .field-input {
+    grid-column: 1 / -1;
+  }
+}

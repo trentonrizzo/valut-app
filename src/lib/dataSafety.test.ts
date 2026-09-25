@@ -50,6 +50,17 @@ describe('data-safety source contracts', () => {
     expect(src).toMatch(/files count decreased/)
   })
 
+  it('major pass migration is additive (no truncate/drop table)', () => {
+    const src = readFileSync(join(root, 'supabase/migrations/20260925180000_major_pass_additive.sql'), 'utf8')
+    const uncommented = src.replace(/--.*$/gm, '')
+    expect(uncommented.toLowerCase()).not.toMatch(/drop table\s/)
+    expect(uncommented.toLowerCase()).not.toMatch(/\btruncate\b/)
+    expect(src).toContain('add column if not exists')
+    expect(src).toContain('media_analysis')
+    // Function drop/recreate for OUT-param changes is allowed; not data-destructive.
+    expect(src).toContain('drop function if exists public.album_content_stats')
+  })
+
   it('album gallery hides non-ready uploads without dropping legacy rows', () => {
     const src = readFileSync(join(root, 'src/lib/albumMembers.ts'), 'utf8')
     expect(src).toContain("upload_status && f.upload_status !== 'ready'")

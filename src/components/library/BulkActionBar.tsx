@@ -18,6 +18,7 @@ type Props = {
   onLock?: () => void
   onUnlock?: () => void
   onSelectAllMatching?: () => void
+  onDetails?: () => void
 }
 
 export function BulkActionBar({
@@ -38,6 +39,7 @@ export function BulkActionBar({
   onLock,
   onUnlock,
   onSelectAllMatching,
+  onDetails,
 }: Props) {
   const [more, setMore] = useState(false)
   if (count === 0) return null
@@ -118,6 +120,18 @@ export function BulkActionBar({
               <button type="button" className="btn btn--outline" onClick={() => onFavorite(true)}>
                 Favorite
               </button>
+              {onDetails && count === 1 ? (
+                <button
+                  type="button"
+                  className="btn btn--outline"
+                  onClick={() => {
+                    setMore(false)
+                    onDetails()
+                  }}
+                >
+                  Details
+                </button>
+              ) : null}
               <button type="button" className="btn btn--outline" onClick={() => onFavorite(false)}>
                 Unfavorite
               </button>

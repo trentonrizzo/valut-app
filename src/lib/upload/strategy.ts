@@ -239,7 +239,11 @@ export function formatSpeedBps(bps: number): string | null {
 
 export function formatEta(seconds: number | null | undefined): string | null {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return null
-  if (seconds < 60) return `~${Math.max(1, Math.round(seconds))}s left`
+  // Bucket short ETAs so the UI does not thrash between ~2s and ~30s.
+  if (seconds < 60) {
+    const bucket = Math.max(5, Math.round(seconds / 5) * 5)
+    return `~${bucket}s left`
+  }
   return `~${Math.round(seconds / 60)}m left`
 }
 
