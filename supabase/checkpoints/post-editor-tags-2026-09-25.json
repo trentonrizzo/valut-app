@@ -1,0 +1,20 @@
+{
+  "project": "zywsjgwizodrxhpxucwn",
+  "pass": "editor-tags-favorites-ai-2026-09-25",
+  "git_sha": "80987ca00d88e15f993ae2574dd80a923d17b141",
+  "captured_at": "2026-09-25T20:17:50.079608+00:00",
+  "counts_after": {
+    "files": 498,
+    "album_files": 497,
+    "albums": 13,
+    "files_with_thumb": 195,
+    "files_purpose_cover": 3,
+    "profiles": 1,
+    "tags": 8,
+    "file_tags": 0,
+    "editor_projects": 0,
+    "files_favorite": 0
+  },
+  "migration": "20260925193000_file_tags_update_policy.sql APPLIED",
+  "visual_ai": "NEEDS_CONFIGURATION (no OPENAI_API_KEY / VAULT_AI_API_KEY in Vercel production)"
+}
