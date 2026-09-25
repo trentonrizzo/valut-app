@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { MediaFilters, MediaSort, ResolutionPreset } from '../../types/media'
 import { advancedFilterCount, clearAdvancedFilters } from '../../lib/libraryFilters'
 
@@ -24,8 +24,11 @@ const SORTS: { id: MediaSort; label: string }[] = [
   { id: 'favorites_first', label: 'Favorites first' },
 ]
 
+type QuickId = 'all' | 'photos' | 'videos' | 'favorites' | 'tags' | 'more'
+
 export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
   const [open, setOpen] = useState(false)
+  const [tagMenu, setTagMenu] = useState(false)
   const [draft, setDraft] = useState(filters)
   const count = advancedFilterCount(filters)
 
@@ -35,8 +38,85 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
 
   const setDraftPatch = (patch: Partial<MediaFilters>) => setDraft((d) => ({ ...d, ...patch }))
 
+  const activeQuick: QuickId =
+    filters.favorite === 'yes'
+      ? 'favorites'
+      : filters.type === 'photos'
+        ? 'photos'
+        : filters.type === 'videos'
+          ? 'videos'
+          : filters.tagIds.length > 0
+            ? 'tags'
+            : 'all'
+
+  const activePills = useMemo(() => {
+    const pills: { key: string; label: string; clear: Partial<MediaFilters> }[] = []
+    if (filters.type === 'photos') pills.push({ key: 'type', label: 'Photos', clear: { type: 'all' } })
+    if (filters.type === 'videos') pills.push({ key: 'type', label: 'Videos', clear: { type: 'all' } })
+    if (filters.favorite === 'yes') pills.push({ key: 'fav', label: 'Favorites', clear: { favorite: 'all' } })
+    if (filters.domain) pills.push({ key: 'domain', label: filters.domain, clear: { domain: null } })
+    for (const id of filters.tagIds) {
+      const t = tags.find((x) => x.id === id)
+      pills.push({
+        key: `tag-${id}`,
+        label: t?.name ?? 'Tag',
+        clear: { tagIds: filters.tagIds.filter((x) => x !== id) },
+      })
+    }
+    if (filters.albumId) {
+      const a = albums.find((x) => x.id === filters.albumId)
+      pills.push({ key: 'album', label: a?.name ?? 'Album', clear: { albumId: null, noAlbum: false } })
+    }
+    if (filters.capturedFrom || filters.capturedTo) {
+      const y = (filters.capturedFrom || filters.capturedTo || '').slice(0, 4)
+      pills.push({
+        key: 'captured',
+        label: y || 'Captured',
+        clear: { capturedFrom: null, capturedTo: null },
+      })
+    }
+    return pills
+  }, [filters, tags, albums])
+
+  function applyQuick(id: QuickId) {
+    if (id === 'more') {
+      setOpen(true)
+      return
+    }
+    if (id === 'tags') {
+      setTagMenu((v) => !v)
+      return
+    }
+    if (id === 'all') {
+      onChange({
+        ...filters,
+        type: 'all',
+        favorite: 'all',
+        tagIds: [],
+        domain: null,
+        resultTitle: null,
+      })
+      return
+    }
+    if (id === 'photos') onChange({ ...filters, type: 'photos', favorite: 'all' })
+    if (id === 'videos') onChange({ ...filters, type: 'videos', favorite: 'all' })
+    if (id === 'favorites') onChange({ ...filters, favorite: 'yes', type: 'all' })
+  }
+
   return (
     <div className="library-controls">
+      {filters.resultTitle ? (
+        <div className="smart-result-banner" role="status">
+          <strong>{filters.resultTitle}</strong>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => onChange({ ...filters, resultTitle: null })}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
       <input
         className="field-input filter-bar__search"
         placeholder="Search photos, videos, files..."
@@ -44,10 +124,64 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
         onChange={(e) => onChange({ ...filters, search: e.target.value })}
         aria-label="Search library"
       />
+      <div className="filter-quick" role="toolbar" aria-label="Quick filters">
+        {(
+          [
+            ['all', 'All'],
+            ['photos', 'Photos'],
+            ['videos', 'Videos'],
+            ['favorites', 'Favorites'],
+            ['tags', 'Tags'],
+            ['more', count > 0 ? `More (${count})` : 'More'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={`filter-quick__chip ${activeQuick === id ? 'is-active' : ''}`}
+            onClick={() => applyQuick(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tagMenu ? (
+        <div className="filter-tag-menu">
+          {tags.length === 0 ? <p className="muted">No tags yet. Create some in Tags.</p> : null}
+          {tags.map((t) => {
+            const on = filters.tagIds.includes(t.id)
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={`filter-chip ${on ? 'is-active' : ''}`}
+                onClick={() => {
+                  const tagIds = on ? filters.tagIds.filter((x) => x !== t.id) : [...filters.tagIds, t.id]
+                  onChange({ ...filters, tagIds })
+                }}
+              >
+                {t.name}
+                {on ? ' ×' : ''}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+      {activePills.length > 0 ? (
+        <div className="filter-active" aria-label="Active filters">
+          {activePills.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              className="filter-chip"
+              onClick={() => onChange({ ...filters, ...p.clear })}
+            >
+              {p.label} ×
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="library-controls__row">
-        <button type="button" className="btn btn--outline" onClick={() => setOpen(true)}>
-          {count > 0 ? `Filters (${count})` : 'Filters'}
-        </button>
         <select
           className="vault-sort-select"
           value={filters.sort}
@@ -64,9 +198,9 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
       {open ? (
         <div className="sheet-root">
           <button type="button" className="sheet-backdrop" aria-label="Close filters" onClick={() => setOpen(false)} />
-          <div className="sheet" role="dialog" aria-label="Library filters">
+          <div className="sheet" role="dialog" aria-label="More filters">
             <div className="sheet__handle" />
-            <h2 className="sheet__title">Filters</h2>
+            <h2 className="sheet__title">More filters</h2>
             <div className="filter-bar filter-bar--sheet">
               <select className="vault-sort-select" value={draft.type} onChange={(e) => setDraftPatch({ type: e.target.value as MediaFilters['type'] })}>
                 <option value="all">All types</option>
@@ -96,6 +230,16 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
                   </option>
                 ))}
               </select>
+              <label className="filter-bar__num">
+                Source / domain
+                <input
+                  className="field-input"
+                  type="text"
+                  placeholder="example.com"
+                  value={draft.domain ?? ''}
+                  onChange={(e) => setDraftPatch({ domain: e.target.value.trim() || null })}
+                />
+              </label>
               <select
                 className="vault-sort-select"
                 value=""
@@ -204,7 +348,7 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
                 type="button"
                 className="btn btn--primary"
                 onClick={() => {
-                  onChange({ ...draft, search: filters.search, sort: filters.sort })
+                  onChange({ ...draft, search: filters.search, sort: filters.sort, resultTitle: filters.resultTitle })
                   setOpen(false)
                 }}
               >

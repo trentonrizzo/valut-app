@@ -171,6 +171,12 @@ export function Settings() {
             <Link className="btn btn--outline btn--block" to="/favorites">
               Favorites
             </Link>
+            <Link className="btn btn--outline btn--block" to="/tags">
+              Tags
+            </Link>
+            <Link className="btn btn--outline btn--block" to="/links">
+              Links
+            </Link>
             <Link className="btn btn--outline btn--block" to="/duplicates">
               Duplicates
             </Link>

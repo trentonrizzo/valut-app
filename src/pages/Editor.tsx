@@ -61,6 +61,27 @@ export function Editor() {
       .catch(() => {})
   }, [user, showToast])
 
+  // Autosave project payload (debounced). Leaving Editor does not erase work.
+  useEffect(() => {
+    if (!user || !projectId) return
+    const kind =
+      payload.slots.filter((s) => s.kind === 'video').length === 1 && payload.slots.length === 1 ? 'video' : 'collage'
+    const t = window.setTimeout(() => {
+      void saveEditorProject(user.id, { id: projectId, title, kind, payload })
+        .then((saved) => {
+          setProjects((prev) => {
+            const i = prev.findIndex((p) => p.id === saved.id)
+            if (i < 0) return [saved, ...prev]
+            const next = prev.slice()
+            next[i] = saved
+            return next
+          })
+        })
+        .catch(() => {})
+    }, 1200)
+    return () => window.clearTimeout(t)
+  }, [user, projectId, title, payload])
+
   useEffect(() => {
     if (!user) return
     const missing = payload.slots

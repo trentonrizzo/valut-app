@@ -173,6 +173,10 @@ export async function listMediaPage(opts: {
   if (f.uploadedTo) q = q.lte('created_at', f.uploadedTo)
   if (v11 && f.capturedFrom) q = q.gte('captured_at', f.capturedFrom)
   if (v11 && f.capturedTo) q = q.lte('captured_at', f.capturedTo)
+  if (f.domain) {
+    const d = sanitizeSearch(f.domain)
+    if (d) q = q.ilike('source_url', `%${d}%`)
+  }
   if (qSearch) {
     if (searchIds && searchIds.length > 0) {
       q = q.or(`file_name.ilike.%${qSearch}%,id.in.(${searchIds.slice(0, 200).join(',')})`)

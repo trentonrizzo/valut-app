@@ -44,10 +44,47 @@ export function Library() {
   const { showToast } = useToast()
   const navigate = useNavigate()
   const [params] = useSearchParams()
-  const [filters, setFilters] = useState(() => ({
-    ...DEFAULT_MEDIA_FILTERS,
-    favorite: params.get('favorite') === 'yes' ? ('yes' as const) : DEFAULT_MEDIA_FILTERS.favorite,
-  }))
+  const [filters, setFilters] = useState(() => {
+    const tag = params.get('tag')
+    const year = params.get('year')
+    const type = params.get('type')
+    const q = params.get('q') || params.get('search') || ''
+    const domain = params.get('domain')
+    const title = params.get('title')
+    return {
+      ...DEFAULT_MEDIA_FILTERS,
+      favorite: params.get('favorite') === 'yes' ? ('yes' as const) : DEFAULT_MEDIA_FILTERS.favorite,
+      type: type === 'photos' || type === 'videos' ? type : DEFAULT_MEDIA_FILTERS.type,
+      tagIds: tag ? [tag] : [],
+      search: q,
+      domain: domain || null,
+      resultTitle: title || null,
+      capturedFrom: year && /^\d{4}$/.test(year) ? `${year}-01-01T00:00:00.000Z` : null,
+      capturedTo: year && /^\d{4}$/.test(year) ? `${year}-12-31T23:59:59.999Z` : null,
+    }
+  })
+
+  useEffect(() => {
+    const tag = params.get('tag')
+    const year = params.get('year')
+    const type = params.get('type')
+    const q = params.get('q') || params.get('search')
+    const domain = params.get('domain')
+    const title = params.get('title')
+    const fav = params.get('favorite')
+    setFilters((prev) => ({
+      ...prev,
+      ...(fav === 'yes' ? { favorite: 'yes' as const } : {}),
+      ...(type === 'photos' || type === 'videos' ? { type } : {}),
+      ...(tag ? { tagIds: tag.split(',').filter(Boolean) } : {}),
+      ...(q != null ? { search: q } : {}),
+      ...(domain != null ? { domain: domain || null } : {}),
+      ...(title != null ? { resultTitle: title || null } : {}),
+      ...(year && /^\d{4}$/.test(year)
+        ? { capturedFrom: `${year}-01-01T00:00:00.000Z`, capturedTo: `${year}-12-31T23:59:59.999Z` }
+        : {}),
+    }))
+  }, [params])
   const [detailsFile, setDetailsFile] = useState<FileRow | null>(null)
   const [rows, setRows] = useState<FileRow[]>([])
   const [cursor, setCursor] = useState<{ ts: string | null; id: string; num: number | null } | null>(null)

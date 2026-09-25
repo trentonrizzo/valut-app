@@ -7,12 +7,13 @@ type Props = {
   onRename: () => void
   onSetCover?: () => void
   onProtect?: () => void
+  onMove?: () => void
   onDelete: () => void
 }
 
 const MENU_Z = 100000
 
-export function AlbumCardMenu({ albumId, disabled, onRename, onSetCover, onProtect, onDelete }: Props) {
+export function AlbumCardMenu({ albumId, disabled, onRename, onSetCover, onProtect, onMove, onDelete }: Props) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -137,6 +138,20 @@ export function AlbumCardMenu({ albumId, disabled, onRename, onSetCover, onProte
           }}
         >
           Password / PIN
+        </button>
+      ) : null}
+      {onMove ? (
+        <button
+          type="button"
+          className="album-menu__item"
+          role="menuitem"
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpen(false)
+            onMove()
+          }}
+        >
+          Move collection…
         </button>
       ) : null}
       <button

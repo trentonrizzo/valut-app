@@ -17,6 +17,7 @@ export function advancedFilterCount(filters: MediaFilters): number {
   if (filters.uploadedTo) n += 1
   if (filters.capturedFrom) n += 1
   if (filters.capturedTo) n += 1
+  if (filters.domain) n += 1
   return n
 }
 

@@ -11,14 +11,27 @@ describe('vault AI planner', () => {
     expect(b.some((c) => c.name === 'get_duplicates')).toBe(true)
   })
 
-  it('plans create tag and favorites', () => {
+  it('plans create tag and favorites including Open Favorites', () => {
     expect(planFromPrompt('Create a tag called Example').some((c) => c.name === 'create_tag')).toBe(true)
     expect(planFromPrompt('Show favorites').some((c) => c.name === 'get_favorites')).toBe(true)
+    const open = planFromPrompt('Open my favorites')
+    expect(open.some((c) => c.name === 'navigate' && (c.args as { path?: string }).path === '/favorites')).toBe(true)
+    expect(open.some((c) => c.name === 'get_favorites')).toBe(true)
+  })
+
+  it('plans create album chicken nuggets without OpenAI', () => {
+    const plan = planFromPrompt('Create a new album called chicken nuggets')
+    expect(plan.some((c) => c.name === 'create_album' && /chicken nuggets/i.test(String(c.args.name)))).toBe(true)
   })
 
   it('does not invent destructive tools', () => {
     const plan = planFromPrompt('Delete everything in my vault permanently')
     expect(plan.every((c) => !/delete|empty|wipe/i.test(c.name))).toBe(true)
+  })
+
+  it('plans show tagged queries', () => {
+    const plan = planFromPrompt('Show everything tagged Blonde')
+    expect(plan.some((c) => c.name === 'search_by_tags')).toBe(true)
   })
 })
 

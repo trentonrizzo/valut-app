@@ -88,6 +88,7 @@ export function Dashboard() {
   const [deleteTarget, setDeleteTarget] = useState<AlbumWithMeta | null>(null)
   const [coverPickerAlbum, setCoverPickerAlbum] = useState<AlbumWithMeta | null>(null)
   const [protectTarget, setProtectTarget] = useState<AlbumWithMeta | null>(null)
+  const [moveTarget, setMoveTarget] = useState<AlbumWithMeta | null>(null)
   const [protectPin, setProtectPin] = useState('')
   const [unlockPin, setUnlockPin] = useState('')
   const [albumUnlocked, setAlbumUnlocked] = useState(0)
@@ -471,6 +472,27 @@ export function Dashboard() {
     return albums.find((a) => a.id === openAlbumId) ?? null
   }, [albums, openAlbumId])
 
+  const rootAlbums = useMemo(() => albums.filter((a) => !a.parent_album_id), [albums])
+
+  const childAlbums = useMemo(() => {
+    if (!openAlbumId) return []
+    return albums.filter((a) => a.parent_album_id === openAlbumId)
+  }, [albums, openAlbumId])
+
+  const albumBreadcrumb = useMemo(() => {
+    if (!openAlbum) return [] as AlbumWithMeta[]
+    const chain: AlbumWithMeta[] = []
+    let cursor: AlbumWithMeta | null = openAlbum
+    const seen = new Set<string>()
+    while (cursor && !seen.has(cursor.id)) {
+      seen.add(cursor.id)
+      chain.unshift(cursor)
+      const pid: string | null | undefined = cursor.parent_album_id
+      cursor = pid ? albums.find((a) => a.id === pid) ?? null : null
+    }
+    return chain
+  }, [openAlbum, albums])
+
   const displayFiles = useMemo(() => sortGalleryFiles(files, fileSort), [files, fileSort])
   void albumUnlocked
 
@@ -536,12 +558,13 @@ export function Dashboard() {
     }
   }, [user, openAlbumId])
 
-  async function handleCreateAlbum(name: string) {
+  async function handleCreateAlbum(name: string, parentAlbumId: string | null = null) {
     if (!user) throw new Error('Not signed in.')
 
     const tempId = `optimistic-${crypto.randomUUID()}`
     const maxOrder = albums.reduce((m, a) => Math.max(m, a.order_index ?? 0), -1)
     const nextOrder = maxOrder + 1
+    const parentId = parentAlbumId ?? null
     const optimistic: AlbumWithMeta = {
       id: tempId,
       user_id: user.id,
@@ -557,24 +580,25 @@ export function Dashboard() {
       order_index: nextOrder,
       cover_file_id: null,
       is_protected: false,
+      parent_album_id: parentId,
+      childCount: 0,
     }
 
     setAlbums((prev) => [...prev, optimistic])
     setCreatingAlbum(true)
 
     try {
-      const { data, error } = await supabase
-        .from('albums')
-        .insert({ user_id: user.id, name, order_index: nextOrder })
-        .select()
-        .single()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: Record<string, unknown> = { user_id: user.id, name, order_index: nextOrder }
+      if (parentId) payload.parent_album_id = parentId
+      const { data, error } = await (supabase as any).from('albums').insert(payload).select().single()
 
       if (error) throw new Error(error.message)
 
       const real = buildAlbumsWithMeta([data as AlbumRow], [])[0]
-      setAlbums((prev) => prev.map((a) => (a.id === tempId ? real : a)))
+      setAlbums((prev) => prev.map((a) => (a.id === tempId ? { ...real, parent_album_id: parentId } : a)))
       navigate(`/albums/${real.id}`)
-      showToast('Album created')
+      showToast('Collection created')
     } catch (e) {
       setAlbums((prev) => prev.filter((a) => a.id !== tempId))
       const msg = e instanceof Error ? e.message : 'Could not create album'
@@ -583,6 +607,40 @@ export function Dashboard() {
     } finally {
       setCreatingAlbum(false)
     }
+  }
+
+  async function handleMoveCollection(album: AlbumWithMeta, newParentId: string | null) {
+    if (!user) return
+    if (newParentId === album.id) {
+      showToast('Collection cannot be its own parent', 'error')
+      return
+    }
+    if (newParentId) {
+      let cursor: string | null = newParentId
+      const seen = new Set<string>([album.id])
+      for (let i = 0; i < 32 && cursor; i += 1) {
+        if (seen.has(cursor)) {
+          showToast('That move would create a cycle', 'error')
+          return
+        }
+        seen.add(cursor)
+        const row = albums.find((a) => a.id === cursor)
+        cursor = row?.parent_album_id ?? null
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase as any)
+      .from('albums')
+      .update({ parent_album_id: newParentId })
+      .eq('id', album.id)
+      .eq('user_id', user.id)
+    if (error) {
+      showToast(error.message, 'error')
+      return
+    }
+    setAlbums((prev) => prev.map((a) => (a.id === album.id ? { ...a, parent_album_id: newParentId } : a)))
+    setMoveTarget(null)
+    showToast(newParentId ? 'Moved under parent' : 'Moved to root')
   }
 
   async function handleRename(newName: string) {
@@ -696,7 +754,7 @@ export function Dashboard() {
               </div>
             ) : (
               <AlbumGrid
-                albums={albums}
+                albums={rootAlbums}
                 userId={user?.id ?? ''}
                 columns={columns}
                 busyAlbumIds={busyIds}
@@ -709,6 +767,7 @@ export function Dashboard() {
                   setProtectTarget(a)
                   setProtectPin('')
                 }}
+                onMove={(a) => setMoveTarget(a)}
                 onCreateClick={() => setCreateModalOpen(true)}
                 onReorder={handleAlbumReorder}
               />
@@ -720,11 +779,33 @@ export function Dashboard() {
               <button
                 type="button"
                 className="btn btn--ghost vault-gallery-toolbar__back"
-                onClick={() => navigate('/albums')}
+                onClick={() => {
+                  const parentId = openAlbum?.parent_album_id
+                  navigate(parentId ? `/albums/${parentId}` : '/albums')
+                }}
               >
-                ← All albums
+                ← {openAlbum?.parent_album_id ? 'Parent' : 'All albums'}
               </button>
               <div className="vault-gallery-toolbar__title">
+                <nav className="album-breadcrumb" aria-label="Collection path">
+                  <button type="button" className="album-breadcrumb__link" onClick={() => navigate('/albums')}>
+                    Albums
+                  </button>
+                  {albumBreadcrumb.map((a) => (
+                    <span key={a.id}>
+                      <span className="album-breadcrumb__sep" aria-hidden>
+                        /
+                      </span>
+                      <button
+                        type="button"
+                        className="album-breadcrumb__link"
+                        onClick={() => navigate(`/albums/${a.id}`)}
+                      >
+                        {a.name}
+                      </button>
+                    </span>
+                  ))}
+                </nav>
                 <h2 className="vault-gallery-toolbar__name">{openAlbum?.name ?? 'Album'}</h2>
                 <span className="vault-gallery-toolbar__count" aria-label="Item count">
                   {files.length === 0
@@ -732,6 +813,7 @@ export function Dashboard() {
                     : files.length === 1
                       ? '1 item'
                       : `${files.length} items`}
+                  {childAlbums.length > 0 ? ` · ${childAlbums.length} nested` : ''}
                 </span>
               </div>
               <div className="vault-gallery-toolbar__actions">
@@ -979,6 +1061,31 @@ export function Dashboard() {
             <div className="banner banner--error" role="alert">
               <strong>Could not load files.</strong> {filesError}
             </div>
+            ) : null}
+
+            {childAlbums.length > 0 || openAlbumId ? (
+              <div className="nested-collections">
+                <div className="row nested-collections__head">
+                  <h3 className="nested-collections__title">Nested collections</h3>
+                  <button type="button" className="btn btn--ghost" onClick={() => setCreateModalOpen(true)}>
+                    + Nested
+                  </button>
+                </div>
+                {childAlbums.length > 0 ? (
+                  <ul className="nested-collections__list">
+                    {childAlbums.map((a) => (
+                      <li key={a.id}>
+                        <button type="button" className="nested-collections__item" onClick={() => navigate(`/albums/${a.id}`)}>
+                          <span>{a.name}</span>
+                          <span className="muted">{a.itemCount} items</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">No nested collections yet.</p>
+                )}
+              </div>
             ) : null}
 
             {filesLoading && files.length === 0 ? (
@@ -1254,7 +1361,40 @@ export function Dashboard() {
         open={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         onCreate={handleCreateAlbum}
+        defaultParentId={openAlbumId}
+        parentOptions={albums.map((a) => ({ id: a.id, name: a.name }))}
       />
+
+      {moveTarget ? (
+        <div className="modal-backdrop" role="presentation" onClick={() => setMoveTarget(null)}>
+          <div className="modal modal--enter" role="dialog" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal__title">Move “{moveTarget.name}”</h2>
+            <p className="muted">Choose a parent collection. Cycles are blocked.</p>
+            <select
+              className="vault-sort-select"
+              defaultValue={moveTarget.parent_album_id ?? ''}
+              onChange={(e) => {
+                const v = e.target.value
+                void handleMoveCollection(moveTarget, v || null)
+              }}
+            >
+              <option value="">Root (top level)</option>
+              {albums
+                .filter((a) => a.id !== moveTarget.id)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+            </select>
+            <div className="modal__actions">
+              <button type="button" className="btn btn--ghost" onClick={() => setMoveTarget(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <RenameAlbumModal
         open={renameTarget !== null}

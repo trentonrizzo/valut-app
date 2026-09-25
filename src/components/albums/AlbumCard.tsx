@@ -23,6 +23,7 @@ type Props = {
   onDelete: (album: AlbumWithMeta) => void
   onSetCover?: (album: AlbumWithMeta) => void
   onProtect?: (album: AlbumWithMeta) => void
+  onMove?: (album: AlbumWithMeta) => void
 }
 
 export function AlbumCard({
@@ -36,6 +37,7 @@ export function AlbumCard({
   onDelete,
   onSetCover,
   onProtect,
+  onMove,
 }: Props) {
   const { displayUrl: previewSrc, failed: previewFailed } = useDecryptedMediaSrc(
     album.previewUrl,
@@ -109,6 +111,7 @@ export function AlbumCard({
           onRename={() => onRename(album)}
           onSetCover={onSetCover ? () => onSetCover(album) : undefined}
           onProtect={onProtect ? () => onProtect(album) : undefined}
+          onMove={onMove ? () => onMove(album) : undefined}
           onDelete={() => onDelete(album)}
         />
       </div>
@@ -118,7 +121,14 @@ export function AlbumCard({
         </h2>
         <div className="album-card__stats" aria-label="Album size and item count">
           <span className="album-card__stats-line">
-            {formatItemCount(album.itemCount)} <span aria-hidden>•</span> {formatBytes(album.totalBytes)}
+            {formatItemCount(album.itemCount)}
+            {(album.childCount ?? 0) > 0 ? (
+              <>
+                {' '}
+                <span aria-hidden>•</span> {album.childCount} nested
+              </>
+            ) : null}{' '}
+            <span aria-hidden>•</span> {formatBytes(album.totalBytes)}
           </span>
         </div>
       </div>

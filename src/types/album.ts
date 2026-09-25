@@ -1,6 +1,9 @@
 import type { Database } from './database'
 
-export type AlbumRow = Database['public']['Tables']['albums']['Row']
+export type AlbumRow = Database['public']['Tables']['albums']['Row'] & {
+  /** Additive nesting column (migration 20260925190000). Null = root. */
+  parent_album_id?: string | null
+}
 
 /** Album with aggregated file stats and preview metadata (computed client-side). */
 export type AlbumWithMeta = AlbumRow & {
@@ -15,4 +18,6 @@ export type AlbumWithMeta = AlbumRow & {
   /** File id for the preview asset (decrypt cache). */
   previewFileId: string | null
   isProtected?: boolean
+  /** Count of direct child collections (computed client-side). */
+  childCount?: number
 }

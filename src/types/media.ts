@@ -41,6 +41,10 @@ export type MediaFilters = {
   uploadedTo: string | null
   capturedFrom: string | null
   capturedTo: string | null
+  /** Substring match against source_url / domain (trustworthy metadata only). */
+  domain: string | null
+  /** Optional banner title for smart/dynamic result views. */
+  resultTitle: string | null
   search: string
   sort: MediaSort
 }
@@ -63,6 +67,8 @@ export const DEFAULT_MEDIA_FILTERS: MediaFilters = {
   uploadedTo: null,
   capturedFrom: null,
   capturedTo: null,
+  domain: null,
+  resultTitle: null,
   search: '',
   sort: 'newest_upload',
 }

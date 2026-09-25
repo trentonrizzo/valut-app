@@ -1,27 +1,61 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { runDeterministicVaultAgent } from '../lib/ai/vaultTools'
+import { createAiJobFromToolResult, processJobChunk } from '../lib/ai/jobs'
+import { AiJobPill } from './AiJobPill'
 
 type Msg = { role: 'user' | 'assistant'; text: string }
 
 export function VaultAiAgent() {
   const { user, session } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  const [messages, setMessages] = useState<Msg[]>([
+  const [dragY, setDragY] = useState(0)
+  const [helpShown] = useState(true)
+  const [messages, setMessages] = useState<Msg[]>(() => [
     {
       role: 'assistant',
-      text: 'Vault AI can organize with tags, albums, favorites, duplicates, and storage stats. Visual analysis needs a configured API key.',
+      text: 'Vault AI organizes your library with the same tools as the app. Try: Create album… · Open Favorites · Create tag… · Show storage. Visual analysis needs an API key.',
     },
   ])
   const recognitionRef = useRef<{ stop: () => void } | null>(null)
+  const sheetRef = useRef<HTMLDivElement | null>(null)
+  const touchStart = useRef<number | null>(null)
 
   useEffect(() => {
     return () => {
       recognitionRef.current?.stop()
     }
   }, [])
+
+  // Resume unfinished jobs in the background while app is open (chunked, persisted).
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    const tick = async () => {
+      if (cancelled || document.visibilityState === 'hidden') return
+      try {
+        const { listActiveJobs } = await import('../lib/ai/jobs')
+        const jobs = await listActiveJobs(user.id)
+        for (const job of jobs.slice(0, 2)) {
+          if (cancelled) break
+          await processJobChunk(user.id, job.id, session?.access_token)
+        }
+      } catch {
+        /* table may not exist yet */
+      }
+    }
+    const id = window.setInterval(() => void tick(), 4000)
+    void tick()
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [user, session?.access_token])
 
   if (!user) return null
 
@@ -32,12 +66,31 @@ export function VaultAiAgent() {
     setMessages((m) => [...m, { role: 'user', text: prompt }])
     setBusy(true)
     try {
-      // Always run controlled Vault tools for actionable prompts (never skip for LLM chat).
+      const albumMatch = location.pathname.match(/^\/albums\/([^/]+)/)
       const local = await runDeterministicVaultAgent(user!.id, prompt, {
         accessToken: session?.access_token,
+        uiScope: {
+          albumId: albumMatch?.[1] || null,
+          path: location.pathname,
+        },
       })
+
+      // Persist org jobs when requested
+      for (const r of local.results) {
+        if (r.tool === 'create_org_job' && r.ok) {
+          const job = await createAiJobFromToolResult(user!.id, prompt, r.data as Record<string, unknown>)
+          if (job) {
+            local.reply = `${local.reply}\n\nStarted background job · ${job.current_phase} · 0 / ${job.progress_total || '?'}`
+          }
+        }
+      }
+
+      for (const path of local.navigations) {
+        if (path.startsWith('/')) navigate(path)
+      }
+
       let reply = local.reply
-      // Optional LLM enrichment when tools did not already execute a plan (or as commentary).
+      // Only call paid chat when tools found nothing AND key may exist — never replace successful tools with generic help.
       if (session?.access_token && local.results.length === 0) {
         try {
           const res = await fetch('/api/ai', {
@@ -46,35 +99,16 @@ export function VaultAiAgent() {
               'content-type': 'application/json',
               authorization: `Bearer ${session.access_token}`,
             },
-            body: JSON.stringify({ action: 'chat', prompt, history: messages.slice(-6) }),
+            body: JSON.stringify({ action: 'chat', prompt, history: messages.filter((m) => m.role !== 'assistant' || !helpShown).slice(-4) }),
           })
-          if (res.ok) {
+          if (res.status === 503) {
+            reply = local.reply
+          } else if (res.ok) {
             const body = (await res.json()) as { reply?: string }
             if (body.reply) reply = body.reply
           }
         } catch {
-          /* keep deterministic reply */
-        }
-      } else if (session?.access_token && local.results.length > 0) {
-        try {
-          const res = await fetch('/api/ai', {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              authorization: `Bearer ${session.access_token}`,
-            },
-            body: JSON.stringify({
-              action: 'chat',
-              prompt: `User asked: ${prompt}\nTool results:\n${local.reply}\nBriefly confirm what was done. Do not invent deletions.`,
-              history: [],
-            }),
-          })
-          if (res.ok) {
-            const body = (await res.json()) as { reply?: string }
-            if (body.reply) reply = `${local.reply}\n\n${body.reply}`
-          }
-        } catch {
-          /* keep tool reply */
+          /* keep deterministic */
         }
       }
       setMessages((m) => [...m, { role: 'assistant', text: reply }])
@@ -90,24 +124,17 @@ export function VaultAiAgent() {
 
   function startVoice() {
     const w = window as unknown as {
-      SpeechRecognition?: new () => {
-        lang: string
-        interimResults: boolean
-        onresult: ((ev: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null
-        onerror: (() => void) | null
-        onend: (() => void) | null
-        start: () => void
-        stop: () => void
-      }
-      webkitSpeechRecognition?: new () => {
-        lang: string
-        interimResults: boolean
-        onresult: ((ev: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null
-        onerror: (() => void) | null
-        onend: (() => void) | null
-        start: () => void
-        stop: () => void
-      }
+      SpeechRecognition?: new () => SpeechRecognition
+      webkitSpeechRecognition?: new () => SpeechRecognition
+    }
+    type SpeechRecognition = {
+      lang: string
+      interimResults: boolean
+      onresult: ((ev: { results: { [i: number]: { [j: number]: { transcript: string } } } }) => void) | null
+      onerror: (() => void) | null
+      onend: (() => void) | null
+      start: () => void
+      stop: () => void
     }
     const SR = w.SpeechRecognition || w.webkitSpeechRecognition
     if (!SR) {
@@ -118,12 +145,10 @@ export function VaultAiAgent() {
     rec.lang = 'en-US'
     rec.interimResults = false
     rec.onresult = (ev) => {
-      const text = ev.results[0]?.[0]?.transcript
-      if (text) void send(text)
+      const said = ev.results[0]?.[0]?.transcript || ''
+      if (said) void send(said)
     }
-    rec.onerror = () => {
-      recognitionRef.current = null
-    }
+    rec.onerror = () => undefined
     rec.onend = () => {
       recognitionRef.current = null
     }
@@ -131,47 +156,76 @@ export function VaultAiAgent() {
     rec.start()
   }
 
+  function onTouchStart(e: React.TouchEvent) {
+    touchStart.current = e.touches[0]?.clientY ?? null
+  }
+  function onTouchMove(e: React.TouchEvent) {
+    if (touchStart.current == null) return
+    const dy = (e.touches[0]?.clientY ?? touchStart.current) - touchStart.current
+    if (dy > 0) setDragY(dy)
+  }
+  function onTouchEnd() {
+    if (dragY > 90) setOpen(false)
+    setDragY(0)
+    touchStart.current = null
+  }
+
   return (
     <>
-      <button
-        type="button"
-        className="vault-ai-fab"
-        aria-label="Open Vault AI"
-        onClick={() => setOpen(true)}
-      >
-        AI
-      </button>
+      <AiJobPill />
+      {!open ? (
+        <button type="button" className="vault-ai-fab" onClick={() => setOpen(true)} aria-label="Open Vault AI">
+          AI
+        </button>
+      ) : null}
       {open ? (
-        <div className="sheet-root vault-ai-sheet">
-          <button type="button" className="sheet-backdrop" aria-label="Close AI" onClick={() => setOpen(false)} />
-          <div className="sheet" role="dialog" aria-label="Vault AI">
-            <div className="sheet__handle" />
-            <h2 className="sheet__title">Vault AI</h2>
-            <div className="vault-ai-chat">
+        <div className="vault-ai-backdrop" onClick={() => setOpen(false)} role="presentation">
+          <div
+            ref={sheetRef}
+            className="vault-ai-sheet"
+            style={dragY ? { transform: `translateY(${dragY}px)` } : undefined}
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            role="dialog"
+            aria-label="Vault AI"
+          >
+            <div className="vault-ai-sheet__handle" aria-hidden />
+            <header className="vault-ai-sheet__head">
+              <strong>Vault AI</strong>
+              <button type="button" className="btn btn--ghost" onClick={() => setOpen(false)}>
+                Close
+              </button>
+            </header>
+            <div className="vault-ai-sheet__msgs">
               {messages.map((m, i) => (
-                <p key={`${m.role}-${i}`} className={`vault-ai-msg vault-ai-msg--${m.role}`}>
+                <div key={`${m.role}-${i}`} className={`vault-ai-msg vault-ai-msg--${m.role}`}>
                   {m.text}
-                </p>
+                </div>
               ))}
             </div>
-            <div className="vault-ai-compose">
+            <form
+              className="vault-ai-sheet__form"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void send(input)
+              }}
+            >
               <input
-                className="field-input"
                 value={input}
-                placeholder="Ask Vault to organize…"
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void send(input)
-                }}
+                placeholder="Ask Vault AI…"
+                aria-label="Vault AI prompt"
                 disabled={busy}
               />
-              <button type="button" className="btn btn--outline" onClick={() => startVoice()} disabled={busy}>
-                Voice
+              <button type="button" onClick={startVoice} disabled={busy}>
+                Mic
               </button>
-              <button type="button" className="btn btn--primary" onClick={() => void send(input)} disabled={busy || !input.trim()}>
+              <button type="submit" disabled={busy || !input.trim()}>
                 {busy ? '…' : 'Send'}
               </button>
-            </div>
+            </form>
           </div>
         </div>
       ) : null}

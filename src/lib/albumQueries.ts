@@ -108,8 +108,12 @@ export async function fetchAlbumsWithCounts(userId: string) {
     const cover = album.cover_file_id ? coverMap.get(album.cover_file_id) : undefined
     const file = cover ?? fallback.get(album.id) ?? null
     const reveal = albumViewAllowed(album)
+    const parentId = (album as AlbumRow).parent_album_id ?? null
+    const childCount = albumRows.filter((a) => ((a as AlbumRow).parent_album_id ?? null) === album.id).length
     return {
       ...album,
+      parent_album_id: parentId,
+      childCount,
       isProtected: album.is_protected === true,
       itemCount: st?.item_count ?? 0,
       totalBytes: st?.total_bytes ?? 0,

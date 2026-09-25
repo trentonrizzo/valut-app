@@ -1,23 +1,36 @@
 import { useEffect, useState, type FormEvent } from 'react'
 
+type ParentOption = { id: string; name: string }
+
 type Props = {
   open: boolean
   onClose: () => void
-  onCreate: (name: string) => Promise<void>
+  onCreate: (name: string, parentAlbumId: string | null) => Promise<void>
+  /** Optional parent when creating inside a collection. */
+  defaultParentId?: string | null
+  parentOptions?: ParentOption[]
 }
 
-export function CreateAlbumModal({ open, onClose, onCreate }: Props) {
+export function CreateAlbumModal({
+  open,
+  onClose,
+  onCreate,
+  defaultParentId = null,
+  parentOptions = [],
+}: Props) {
   const [name, setName] = useState('')
+  const [parentId, setParentId] = useState<string | null>(defaultParentId)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
       setName('')
+      setParentId(defaultParentId)
       setError(null)
       setSubmitting(false)
     }
-  }, [open])
+  }, [open, defaultParentId])
 
   if (!open) return null
 
@@ -31,7 +44,7 @@ export function CreateAlbumModal({ open, onClose, onCreate }: Props) {
     setError(null)
     setSubmitting(true)
     try {
-      await onCreate(trimmed)
+      await onCreate(trimmed, parentId)
       setName('')
       onClose()
     } catch (err) {
@@ -66,7 +79,7 @@ export function CreateAlbumModal({ open, onClose, onCreate }: Props) {
           ×
         </button>
         <h2 id="create-album-title" className="modal__title">
-          New album
+          New collection
         </h2>
         <form onSubmit={handleSubmit} className="modal__form">
           <label htmlFor="album-name" className="field-label">
@@ -83,6 +96,27 @@ export function CreateAlbumModal({ open, onClose, onCreate }: Props) {
             autoFocus
             disabled={submitting}
           />
+          {parentOptions.length > 0 ? (
+            <>
+              <label htmlFor="album-parent" className="field-label">
+                Inside collection
+              </label>
+              <select
+                id="album-parent"
+                className="vault-sort-select"
+                value={parentId ?? ''}
+                onChange={(e) => setParentId(e.target.value || null)}
+                disabled={submitting}
+              >
+                <option value="">Root (top level)</option>
+                {parentOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : null}
           {error ? <p className="field-error">{error}</p> : null}
           <div className="modal__actions">
             <button type="button" className="btn btn--ghost" onClick={onClose} disabled={submitting}>

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   DndContext,
   KeyboardSensor,
@@ -30,6 +30,7 @@ type Props = {
   onDelete: (album: AlbumWithMeta) => void
   onSetCover?: (album: AlbumWithMeta) => void
   onProtect?: (album: AlbumWithMeta) => void
+  onMove?: (album: AlbumWithMeta) => void
   onCreateClick: () => void
   onReorder: (next: AlbumWithMeta[]) => void
 }
@@ -39,24 +40,29 @@ function SortableAlbumItem({
   userId,
   busy,
   active,
+  showDragHandle,
   onOpen,
   onRename,
   onDelete,
   onSetCover,
   onProtect,
+  onMove,
 }: {
   album: AlbumWithMeta
   userId: string
   busy: boolean
   active: boolean
+  showDragHandle: boolean
   onOpen: (album: AlbumWithMeta) => void
   onRename: (album: AlbumWithMeta) => void
   onDelete: (album: AlbumWithMeta) => void
   onSetCover?: (album: AlbumWithMeta) => void
   onProtect?: (album: AlbumWithMeta) => void
+  onMove?: (album: AlbumWithMeta) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: album.id,
+    disabled: !showDragHandle,
   })
 
   const style = {
@@ -78,23 +84,26 @@ function SortableAlbumItem({
         onDelete={onDelete}
         onSetCover={onSetCover}
         onProtect={onProtect}
+        onMove={onMove}
         dragHandle={
-          <button
-            type="button"
-            className="album-card__drag-handle"
-            {...listeners}
-            {...attributes}
-            aria-label="Drag to reorder album"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <circle cx="9" cy="7" r="1.35" />
-              <circle cx="15" cy="7" r="1.35" />
-              <circle cx="9" cy="12" r="1.35" />
-              <circle cx="15" cy="12" r="1.35" />
-              <circle cx="9" cy="17" r="1.35" />
-              <circle cx="15" cy="17" r="1.35" />
-            </svg>
-          </button>
+          showDragHandle ? (
+            <button
+              type="button"
+              className="album-card__drag-handle"
+              {...listeners}
+              {...attributes}
+              aria-label="Drag to reorder album"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <circle cx="9" cy="7" r="1.35" />
+                <circle cx="15" cy="7" r="1.35" />
+                <circle cx="9" cy="12" r="1.35" />
+                <circle cx="15" cy="12" r="1.35" />
+                <circle cx="9" cy="17" r="1.35" />
+                <circle cx="15" cy="17" r="1.35" />
+              </svg>
+            </button>
+          ) : null
         }
       />
     </li>
@@ -112,6 +121,7 @@ export function AlbumGrid({
   onDelete,
   onSetCover,
   onProtect,
+  onMove,
   onCreateClick,
   onReorder,
 }: Props) {
@@ -132,8 +142,15 @@ export function AlbumGrid({
     onReorder(next)
   }
 
+  const [reorderMode, setReorderMode] = useState(false)
+
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <div className="row album-grid__toolbar">
+        <button type="button" className={`btn btn--ghost ${reorderMode ? 'is-active' : ''}`} onClick={() => setReorderMode((v) => !v)}>
+          {reorderMode ? 'Done reordering' : 'Reorder'}
+        </button>
+      </div>
       {albums.length === 0 ? (
         <div className="album-empty album-empty--rich">
           <div className="album-empty__visual" aria-hidden>
@@ -183,11 +200,13 @@ export function AlbumGrid({
                 userId={userId}
                 busy={busyAlbumIds.has(album.id)}
                 active={activeAlbumId === album.id}
+                showDragHandle={reorderMode}
                 onOpen={onOpen}
                 onRename={onRename}
                 onDelete={onDelete}
                 onSetCover={onSetCover}
                 onProtect={onProtect}
+                onMove={onMove}
               />
             ))}
           </ul>
