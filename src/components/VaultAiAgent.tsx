@@ -40,13 +40,13 @@ export function VaultAiAgent() {
       // Optional LLM enrichment when tools did not already execute a plan (or as commentary).
       if (session?.access_token && local.results.length === 0) {
         try {
-          const res = await fetch('/api/ai/chat', {
+          const res = await fetch('/api/ai', {
             method: 'POST',
             headers: {
               'content-type': 'application/json',
               authorization: `Bearer ${session.access_token}`,
             },
-            body: JSON.stringify({ prompt, history: messages.slice(-6) }),
+            body: JSON.stringify({ action: 'chat', prompt, history: messages.slice(-6) }),
           })
           if (res.ok) {
             const body = (await res.json()) as { reply?: string }
@@ -57,13 +57,14 @@ export function VaultAiAgent() {
         }
       } else if (session?.access_token && local.results.length > 0) {
         try {
-          const res = await fetch('/api/ai/chat', {
+          const res = await fetch('/api/ai', {
             method: 'POST',
             headers: {
               'content-type': 'application/json',
               authorization: `Bearer ${session.access_token}`,
             },
             body: JSON.stringify({
+              action: 'chat',
               prompt: `User asked: ${prompt}\nTool results:\n${local.reply}\nBriefly confirm what was done. Do not invent deletions.`,
               history: [],
             }),

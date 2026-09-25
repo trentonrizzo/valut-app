@@ -236,13 +236,13 @@ export async function analyzeMediaVisual(opts: {
   if (opts.focus?.blondeHair) focusParts.push('blonde hair presence')
   if (opts.focus?.freeText) focusParts.push(opts.focus.freeText)
 
-  const res = await fetch('/api/ai/analyze', {
+  const res = await fetch('/api/ai', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       authorization: `Bearer ${opts.accessToken}`,
     },
-    body: JSON.stringify({ images, focus: focusParts.join('; ') || undefined }),
+    body: JSON.stringify({ action: 'analyze', images, focus: focusParts.join('; ') || undefined }),
   })
   if (res.status === 503) {
     await upsertAnalysis({
