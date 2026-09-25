@@ -38,12 +38,14 @@ import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
 import { MediaDetailsSheet } from '../components/files/MediaDetailsSheet'
 import { UploadQueueOverlay } from '../components/UploadQueueOverlay'
 import { filesFromInput, logUploadSelection, selectionFailureReason } from '../lib/upload/selectFiles'
+import { useMediaSelection } from '../context/SelectionContext'
 
 export function Library() {
   const { user, session } = useAuth()
   const { showToast } = useToast()
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const { setSelectedFileIds } = useMediaSelection()
   const [filters, setFilters] = useState(() => {
     const tag = params.get('tag')
     const year = params.get('year')
@@ -74,8 +76,11 @@ export function Library() {
     const fav = params.get('favorite')
     setFilters((prev) => ({
       ...prev,
-      ...(fav === 'yes' ? { favorite: 'yes' as const } : {}),
-      ...(type === 'photos' || type === 'videos' ? { type } : {}),
+      // When URL explicitly sets favorite=yes (Favorites route), apply it.
+      // When URL has no favorite param, clear a prior URL-driven favorites filter
+      // so Library tab after Favorites does not stay stuck empty/filtered.
+      favorite: fav === 'yes' ? 'yes' : fav === 'no' ? 'no' : 'all',
+      ...(type === 'photos' || type === 'videos' ? { type } : type == null ? {} : { type: 'all' as const }),
       ...(tag ? { tagIds: tag.split(',').filter(Boolean) } : {}),
       ...(q != null ? { search: q } : {}),
       ...(domain != null ? { domain: domain || null } : {}),
@@ -85,11 +90,16 @@ export function Library() {
         : {}),
     }))
   }, [params])
+
   const [detailsFile, setDetailsFile] = useState<FileRow | null>(null)
   const [rows, setRows] = useState<FileRow[]>([])
   const [cursor, setCursor] = useState<{ ts: string | null; id: string; num: number | null } | null>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
+    setSelectedFileIds([...selected])
+  }, [selected, setSelectedFileIds])
   const [tags, setTags] = useState<{ id: string; name: string }[]>([])
   const [albums, setAlbums] = useState<{ id: string; name: string }[]>([])
   const [tagModal, setTagModal] = useState<'add' | 'remove' | null>(null)
@@ -242,8 +252,13 @@ export function Library() {
           }}
           onFavorite={async (on) => {
             if (!user) return
-            await setFavorite(user.id, [...selected], on)
-            setRows((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, favorite: on } : r)))
+            try {
+              await setFavorite(user.id, [...selected], on)
+              setRows((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, favorite: on } : r)))
+              showToast(on ? `${selected.size} favorited` : `${selected.size} unfavorited`)
+            } catch (e) {
+              showToast(e instanceof Error ? e.message : 'Favorite failed', 'error')
+            }
           }}
           onRate={async (rating) => {
             if (!user) return
@@ -262,7 +277,9 @@ export function Library() {
         {loading && rows.length === 0 ? (
           <div className="vault-loading">Loading library…</div>
         ) : rows.length === 0 ? (
-          <div className="vault-empty">No media yet.</div>
+          <div className="vault-empty">
+            {filters.favorite === 'yes' ? 'No favorites yet. Select media and tap Favorite.' : 'No media yet.'}
+          </div>
         ) : (
           <ul className="vault-grid vault-grid--gallery">
             {rows.map((f) => {
@@ -328,10 +345,19 @@ export function Library() {
         onClose={() => setTagModal(null)}
         onApply={async (tagIds) => {
           if (!user) return
-          if (tagModal === 'add') await addTagsToFiles(user.id, [...selected], tagIds)
-          else await removeTagsFromFiles(user.id, [...selected], tagIds)
-          setTagModal(null)
-          showToast('Tags updated')
+          const ids = [...selected]
+          try {
+            if (tagModal === 'add') {
+              await addTagsToFiles(user.id, ids, tagIds)
+              showToast(`${ids.length} item(s) tagged`)
+            } else {
+              await removeTagsFromFiles(user.id, ids, tagIds)
+              showToast(`Tags removed from ${ids.length} item(s)`)
+            }
+            setTagModal(null)
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : 'Tag update failed', 'error')
+          }
         }}
       />
       <UploadQueueOverlay
@@ -355,7 +381,13 @@ export function Library() {
         onCancelQueued={cancelQueued}
         onDismissCompleted={dismissCompleted}
       />
-      <MediaDetailsSheet file={detailsFile} onClose={() => setDetailsFile(null)} />
+      <MediaDetailsSheet
+        file={detailsFile}
+        onClose={() => setDetailsFile(null)}
+        onChanged={() => {
+          void load(true)
+        }}
+      />
     </div>
   )
 }

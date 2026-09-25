@@ -24,6 +24,16 @@ describe('vault AI planner', () => {
     expect(plan.some((c) => c.name === 'create_album' && /chicken nuggets/i.test(String(c.args.name)))).toBe(true)
   })
 
+  it('plans create me a new album variants', () => {
+    const plan = planFromPrompt('Create me a new album called chicken nuggets')
+    expect(plan.some((c) => c.name === 'create_album' && /chicken nuggets/i.test(String(c.args.name)))).toBe(true)
+  })
+
+  it('plans tag these with selection', () => {
+    const plan = planFromPrompt('Tag these Redhead', { selectedFileIds: ['a', 'b'] })
+    expect(plan.some((c) => c.name === 'assign_tag')).toBe(true)
+  })
+
   it('does not invent destructive tools', () => {
     const plan = planFromPrompt('Delete everything in my vault permanently')
     expect(plan.every((c) => !/delete|empty|wipe/i.test(c.name))).toBe(true)

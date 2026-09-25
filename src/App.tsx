@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthProvider'
 import { VaultProvider } from './context/VaultProvider'
 import { ToastProvider } from './context/ToastContext'
+import { SelectionProvider } from './context/SelectionContext'
 import { ProtectedRoute } from './components/layout/ProtectedRoute'
 import { AppShell } from './components/layout/AppShell'
 import { Home } from './pages/Home'
@@ -38,6 +39,7 @@ export default function App() {
     <AuthProvider>
       <VaultProvider>
       <ToastProvider>
+        <SelectionProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Home />} />
@@ -69,6 +71,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
+        </SelectionProvider>
       </ToastProvider>
       </VaultProvider>
     </AuthProvider>

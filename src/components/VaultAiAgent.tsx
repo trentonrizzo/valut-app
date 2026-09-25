@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
+import { useMediaSelection } from '../context/SelectionContext'
 import { runDeterministicVaultAgent } from '../lib/ai/vaultTools'
 import { createAiJobFromToolResult, processJobChunk } from '../lib/ai/jobs'
 import { AiJobPill } from './AiJobPill'
@@ -9,13 +10,13 @@ type Msg = { role: 'user' | 'assistant'; text: string }
 
 export function VaultAiAgent() {
   const { user, session } = useAuth()
+  const { selectedFileIds } = useMediaSelection()
   const navigate = useNavigate()
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [dragY, setDragY] = useState(0)
-  const [helpShown] = useState(true)
   const [messages, setMessages] = useState<Msg[]>(() => [
     {
       role: 'assistant',
@@ -72,6 +73,7 @@ export function VaultAiAgent() {
         uiScope: {
           albumId: albumMatch?.[1] || null,
           path: location.pathname,
+          selectedFileIds,
         },
       })
 
@@ -90,8 +92,11 @@ export function VaultAiAgent() {
       }
 
       let reply = local.reply
-      // Only call paid chat when tools found nothing AND key may exist — never replace successful tools with generic help.
-      if (session?.access_token && local.results.length === 0) {
+      const toolOk = local.results.some((r) => r.ok)
+      const asksHelp = /\b(help|what can you do|capabilities|commands)\b/i.test(prompt)
+      // Paid chat is suggestions-only. Never let it replace deterministic tool results or
+      // drown create/open commands in a generic capability paragraph.
+      if (session?.access_token && local.results.length === 0 && !toolOk && asksHelp) {
         try {
           const res = await fetch('/api/ai', {
             method: 'POST',
@@ -99,11 +104,13 @@ export function VaultAiAgent() {
               'content-type': 'application/json',
               authorization: `Bearer ${session.access_token}`,
             },
-            body: JSON.stringify({ action: 'chat', prompt, history: messages.filter((m) => m.role !== 'assistant' || !helpShown).slice(-4) }),
+            body: JSON.stringify({
+              action: 'chat',
+              prompt,
+              history: messages.filter((m) => m.role === 'user').slice(-4),
+            }),
           })
-          if (res.status === 503) {
-            reply = local.reply
-          } else if (res.ok) {
+          if (res.ok) {
             const body = (await res.json()) as { reply?: string }
             if (body.reply) reply = body.reply
           }

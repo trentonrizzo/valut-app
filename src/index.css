@@ -3593,3 +3593,223 @@ button {
     grid-column: 1 / -1;
   }
 }
+
+/* —— Editor mobile workspace (2026-09-25) —— */
+.editor-page--workspace .dashboard__main {
+  padding-bottom: 5.5rem;
+}
+.editor-workspace__bar {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.editor-workspace__title {
+  flex: 1;
+  min-width: 0;
+}
+.editor-workspace .editor-canvas {
+  min-height: min(52vh, 420px);
+  margin: 0.5rem 0;
+}
+.editor-slot.is-on {
+  outline: 2px solid rgba(96, 165, 250, 0.85);
+  outline-offset: -2px;
+}
+.editor-slot__empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 7rem;
+}
+.editor-workspace__transport {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.4rem 0;
+}
+.editor-scene-strip {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding: 0.25rem 0;
+}
+.editor-scene-chip {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  min-height: 2.25rem;
+}
+.editor-scene-chip.is-active {
+  background: rgba(96, 165, 250, 0.22);
+  border-color: rgba(96, 165, 250, 0.5);
+}
+.editor-project-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+.editor-project-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.editor-project-card__main {
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 0;
+}
+.editor-project-card__actions {
+  display: flex;
+  gap: 0.35rem;
+}
+.sheet--editor-picker {
+  max-height: min(92vh, 900px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+.editor-picker__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.editor-picker__selects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+.editor-picker__selects label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.editor-picker-grid--large {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  overflow: auto;
+  flex: 1;
+  min-height: 40vh;
+  max-height: 55vh;
+}
+.editor-picker-tile {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  padding: 0;
+  background: #111;
+}
+.editor-picker-tile.is-selected {
+  border-color: rgba(96, 165, 250, 0.9);
+}
+.editor-picker-tile__check {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.95);
+  color: #0b0b0c;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.editor-picker__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.editor-timeline {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+.editor-timeline__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.editor-timeline__track {
+  position: relative;
+  height: 2.75rem;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.06);
+  touch-action: none;
+}
+.editor-timeline__full {
+  position: absolute;
+  inset: 0.55rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+}
+.editor-timeline__range {
+  position: absolute;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  border-radius: 6px;
+  background: rgba(96, 165, 250, 0.35);
+}
+.editor-timeline__handle {
+  position: absolute;
+  top: 0.2rem;
+  width: 1.35rem;
+  height: 2.35rem;
+  margin-left: -0.65rem;
+  border: 0;
+  border-radius: 8px;
+  background: #60a5fa;
+  z-index: 2;
+}
+.editor-timeline__playhead {
+  position: absolute;
+  top: 0.15rem;
+  bottom: 0.15rem;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  z-index: 3;
+  pointer-events: none;
+}
+.editor-tools__gestures {
+  display: grid;
+  gap: 0.35rem;
+}
+.editor-tools__gestures label,
+.editor-volume {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.tag-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.media-details__tags {
+  max-width: 100%;
+}

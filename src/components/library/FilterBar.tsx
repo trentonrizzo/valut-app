@@ -24,11 +24,12 @@ const SORTS: { id: MediaSort; label: string }[] = [
   { id: 'favorites_first', label: 'Favorites first' },
 ]
 
-type QuickId = 'all' | 'photos' | 'videos' | 'favorites' | 'tags' | 'more'
+type QuickId = 'all' | 'photos' | 'videos' | 'favorites' | 'tags' | 'albums' | 'more'
 
 export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
   const [open, setOpen] = useState(false)
   const [tagMenu, setTagMenu] = useState(false)
+  const [albumMenu, setAlbumMenu] = useState(false)
   const [draft, setDraft] = useState(filters)
   const count = advancedFilterCount(filters)
 
@@ -47,7 +48,9 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
           ? 'videos'
           : filters.tagIds.length > 0
             ? 'tags'
-            : 'all'
+            : filters.albumId
+              ? 'albums'
+              : 'all'
 
   const activePills = useMemo(() => {
     const pills: { key: string; label: string; clear: Partial<MediaFilters> }[] = []
@@ -84,7 +87,13 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
       return
     }
     if (id === 'tags') {
+      setAlbumMenu(false)
       setTagMenu((v) => !v)
+      return
+    }
+    if (id === 'albums') {
+      setTagMenu(false)
+      setAlbumMenu((v) => !v)
       return
     }
     if (id === 'all') {
@@ -93,6 +102,7 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
         type: 'all',
         favorite: 'all',
         tagIds: [],
+        albumId: null,
         domain: null,
         resultTitle: null,
       })
@@ -132,6 +142,7 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
             ['videos', 'Videos'],
             ['favorites', 'Favorites'],
             ['tags', 'Tags'],
+            ['albums', 'Albums'],
             ['more', count > 0 ? `More (${count})` : 'More'],
           ] as const
         ).map(([id, label]) => (
@@ -161,6 +172,25 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
                 }}
               >
                 {t.name}
+                {on ? ' ×' : ''}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+      {albumMenu ? (
+        <div className="filter-tag-menu">
+          {albums.length === 0 ? <p className="muted">No albums yet.</p> : null}
+          {albums.map((a) => {
+            const on = filters.albumId === a.id
+            return (
+              <button
+                key={a.id}
+                type="button"
+                className={`filter-chip ${on ? 'is-active' : ''}`}
+                onClick={() => onChange({ ...filters, albumId: on ? null : a.id, noAlbum: false })}
+              >
+                {a.name}
                 {on ? ' ×' : ''}
               </button>
             )

@@ -2,7 +2,8 @@
  * Export editor collage as a NEW Vault file via existing upload pipeline.
  * Never overwrites originals. Success only after enqueue (verify-before-catalog in manager).
  */
-import type { EditorProjectPayload, EditorSlot } from './projects'
+import type { EditorLayout, EditorLayer, EditorProjectPayload } from './projects'
+import { activeScene, normalizePayload } from './projects'
 import { enqueueFiles } from '../upload/manager'
 import { resolveVaultMedia } from '../media/resolveMedia'
 
@@ -10,7 +11,7 @@ export type ExportResult =
   | { ok: true; jobIds: string[]; fileName: string }
   | { ok: false; error: string }
 
-function layoutGrid(layout: EditorProjectPayload['layout']): { cols: number; rows: number; cells: number } {
+function layoutGrid(layout: EditorLayout | undefined): { cols: number; rows: number; cells: number } {
   switch (layout) {
     case '1':
       return { cols: 1, rows: 1, cells: 1 }
@@ -73,17 +74,19 @@ export async function exportEditorCollageToVault(opts: {
   fileById: Record<string, { id: string; file_url: string | null; file_name: string; mime_type: string | null; is_encrypted: boolean }>
   masterKey: CryptoKey | null
 }): Promise<ExportResult> {
-  const slots = opts.payload.slots.filter((s) => s.fileId)
+  const payload = normalizePayload(opts.payload)
+  const scene = activeScene(payload)
+  const slots = scene.layers.filter((s) => s.fileId) as EditorLayer[]
   if (!slots.length) return { ok: false, error: 'Add at least one image before exporting.' }
-  if (slots.some((s) => s.kind === 'video')) {
+  if (slots.some((s) => s.kind === 'video') || payload.scenes.length > 1) {
     return {
       ok: false,
       error:
-        'Video collage export is not reliable in-browser yet. Export image collages, or save the project (originals stay untouched).',
+        'Video / multi-scene export is not reliable in-browser yet. Export a single image collage scene, or save the project (originals stay untouched).',
     }
   }
 
-  const { cols, rows } = layoutGrid(opts.payload.layout)
+  const { cols, rows } = layoutGrid(scene.layout)
   const cell = 720
   const canvas = document.createElement('canvas')
   canvas.width = cols * cell
@@ -94,7 +97,7 @@ export async function exportEditorCollageToVault(opts: {
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
   const positions: { x: number; y: number; w: number; h: number }[] = []
-  if (opts.payload.layout === '1+2') {
+  if (scene.layout === '1+2') {
     positions.push({ x: 0, y: 0, w: cell * 2, h: cell })
     positions.push({ x: 0, y: cell, w: cell, h: cell })
     positions.push({ x: cell, y: cell, w: cell, h: cell })
@@ -107,7 +110,7 @@ export async function exportEditorCollageToVault(opts: {
   }
 
   for (let i = 0; i < slots.length && i < positions.length; i++) {
-    const slot = slots[i] as EditorSlot
+    const slot = slots[i]!
     const file = opts.fileById[slot.fileId!]
     if (!file) continue
     const resolved = await resolveVaultMedia({
@@ -119,7 +122,19 @@ export async function exportEditorCollageToVault(opts: {
     })
     const img = await loadImage(resolved.displayUrl)
     const pos = positions[i]!
-    drawFitted(ctx, img, pos.x, pos.y, pos.w, pos.h, slot.objectFit, img.naturalWidth, img.naturalHeight)
+    // Apply zoom/pan relative to cell center for export honesty with project state.
+    const zoom = Math.max(0.5, slot.zoom || 1)
+    const panX = slot.panX || 0
+    const panY = slot.panY || 0
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(pos.x, pos.y, pos.w, pos.h)
+    ctx.clip()
+    ctx.translate(pos.x + pos.w / 2 + panX * pos.w, pos.y + pos.h / 2 + panY * pos.h)
+    ctx.scale(zoom, zoom)
+    ctx.translate(-pos.w / 2, -pos.h / 2)
+    drawFitted(ctx, img, 0, 0, pos.w, pos.h, slot.objectFit, img.naturalWidth, img.naturalHeight)
+    ctx.restore()
   }
 
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.9))

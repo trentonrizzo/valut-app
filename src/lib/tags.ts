@@ -52,9 +52,13 @@ export async function deleteTag(userId: string, tagId: string) {
 
 export async function addTagsToFiles(userId: string, fileIds: string[], tagIds: string[]) {
   const rows = fileIds.flatMap((file_id) => tagIds.map((tag_id) => ({ file_id, tag_id, user_id: userId })))
-  if (rows.length === 0) return
-  const { error } = await supabase.from('file_tags').upsert(rows, { onConflict: 'file_id,tag_id' })
+  if (rows.length === 0) return 0
+  // INSERT-only upsert: file_tags has no UPDATE RLS policy, so ON CONFLICT DO UPDATE fails.
+  const { error, count } = await supabase
+    .from('file_tags')
+    .upsert(rows, { onConflict: 'file_id,tag_id', ignoreDuplicates: true, count: 'exact' })
   if (error) throw new Error(error.message)
+  return count ?? rows.length
 }
 
 export async function removeTagsFromFiles(userId: string, fileIds: string[], tagIds: string[]) {

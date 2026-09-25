@@ -1,74 +1,79 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
+import { useVault } from '../context/useVault'
 import { supabase } from '../lib/supabase'
-import { listMediaPage } from '../lib/mediaQueries'
-import { DEFAULT_MEDIA_FILTERS } from '../types/media'
 import type { FileRow } from '../types/media'
 import { classifyFileKind } from '../lib/fileKind'
 import {
+  LAYOUTS,
+  activeScene,
   deleteEditorProject,
+  duplicateEditorProject,
+  emptyLayer,
   emptyPayload,
+  emptyScene,
   exportSupported,
+  inferProjectKind,
+  layersForLayout,
   listEditorProjects,
+  normalizePayload,
+  projectDurationSec,
+  projectMediaCount,
   saveEditorProject,
+  type EditorLayer,
+  type EditorLayout,
   type EditorProject,
   type EditorProjectPayload,
-  type EditorSlot,
+  type EditorScene,
 } from '../lib/editor/projects'
 import { exportEditorCollageToVault } from '../lib/editor/exportToVault'
 import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
-import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
-import { useVault } from '../context/useVault'
+import { EditorMediaPicker } from '../components/editor/EditorMediaPicker'
+import { EditorTimeline } from '../components/editor/EditorTimeline'
 
-const LAYOUTS: { id: EditorProjectPayload['layout']; label: string }[] = [
-  { id: '1', label: '1' },
-  { id: '1x2', label: '2 across' },
-  { id: '2x1', label: '2 stacked' },
-  { id: '1+2', label: '3' },
-  { id: '2x2', label: '2×2' },
-]
+type Mode = 'home' | 'edit'
+
+const SPEEDS = [0.5, 1, 1.5, 2]
 
 export function Editor() {
   const { user, session } = useAuth()
   const { masterKey } = useVault()
   const { showToast } = useToast()
+  const [mode, setMode] = useState<Mode>('home')
   const [projects, setProjects] = useState<EditorProject[]>([])
   const [title, setTitle] = useState('Untitled')
-  const [payload, setPayload] = useState<EditorProjectPayload>(emptyPayload('2x2'))
+  const [payload, setPayload] = useState<EditorProjectPayload>(() => emptyPayload('1'))
   const [projectId, setProjectId] = useState<string | undefined>()
-  const [picker, setPicker] = useState<FileRow[]>([])
-  const [pickerCursor, setPickerCursor] = useState<{ ts: string | null; id: string; num: number | null } | null>(null)
-  const [slotIndex, setSlotIndex] = useState<number | null>(null)
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerMode, setPickerMode] = useState<'fill-empty' | 'replace'>('fill-empty')
   const [fileById, setFileById] = useState<Record<string, FileRow>>({})
   const [exporting, setExporting] = useState(false)
+  const [playing, setPlaying] = useState(false)
+  const [seekTime, setSeekTime] = useState(0)
+  const [sourceDuration, setSourceDuration] = useState(0)
   const exportCaps = useMemo(() => exportSupported(), [])
+  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
+
+  const scene = activeScene(payload)
+  const selectedLayer = scene.layers.find((l) => l.id === selectedLayerId) ?? scene.layers.find((l) => l.fileId) ?? null
 
   useEffect(() => {
     if (!user) return
-    void listEditorProjects(user.id).then(setProjects).catch((e) => showToast(e instanceof Error ? e.message : 'Could not load projects', 'error'))
-    void listMediaPage({ userId: user.id, filters: DEFAULT_MEDIA_FILTERS, limit: 48 })
-      .then((p) => {
-        setPicker(p.rows)
-        setPickerCursor(p.nextCursor)
-        setFileById((prev) => {
-          const next = { ...prev }
-          for (const r of p.rows) next[r.id] = r
-          return next
-        })
-      })
-      .catch(() => {})
+    void listEditorProjects(user.id)
+      .then(setProjects)
+      .catch((e) => showToast(e instanceof Error ? e.message : 'Could not load projects', 'error'))
   }, [user, showToast])
 
-  // Autosave project payload (debounced). Leaving Editor does not erase work.
+  // Autosave — create row on first edit if needed (debounced).
   useEffect(() => {
-    if (!user || !projectId) return
-    const kind =
-      payload.slots.filter((s) => s.kind === 'video').length === 1 && payload.slots.length === 1 ? 'video' : 'collage'
+    if (!user || mode !== 'edit') return
+    const kind = inferProjectKind(payload)
     const t = window.setTimeout(() => {
-      void saveEditorProject(user.id, { id: projectId, title, kind, payload })
+      void saveEditorProject(user.id, { id: projectId, title: title || 'Untitled', kind, payload })
         .then((saved) => {
+          setProjectId(saved.id)
           setProjects((prev) => {
             const i = prev.findIndex((p) => p.id === saved.id)
             if (i < 0) return [saved, ...prev]
@@ -78,21 +83,21 @@ export function Editor() {
           })
         })
         .catch(() => {})
-    }, 1200)
+    }, 900)
     return () => window.clearTimeout(t)
-  }, [user, projectId, title, payload])
+  }, [user, mode, projectId, title, payload])
 
   useEffect(() => {
     if (!user) return
-    const missing = payload.slots
-      .map((s) => s.fileId)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0 && !fileById[id])
-    if (missing.length === 0) return
+    const ids = payload.scenes
+      .flatMap((s) => s.layers.map((l) => l.fileId))
+      .filter((id): id is string => Boolean(id && !fileById[id]))
+    if (!ids.length) return
     void supabase
       .from('files')
       .select('*')
       .eq('user_id', user.id)
-      .in('id', missing)
+      .in('id', ids)
       .then(({ data }) => {
         if (!data) return
         setFileById((prev) => {
@@ -101,35 +106,111 @@ export function Editor() {
           return next
         })
       })
-  }, [payload.slots, user, fileById])
+  }, [payload, user, fileById])
 
-  function setLayout(layout: EditorProjectPayload['layout']) {
-    const next = emptyPayload(layout)
-    next.slots = next.slots.map((s, i) => payload.slots[i] ?? s)
-    setPayload(next)
+  function updatePayload(mutator: (p: EditorProjectPayload) => EditorProjectPayload) {
+    setPayload((prev) => normalizePayload(mutator(prev)))
   }
 
-  function updateSlot(index: number, patch: Partial<EditorSlot>) {
-    const slots = payload.slots.slice()
-    slots[index] = { ...slots[index]!, ...patch }
-    setPayload({ ...payload, slots })
+  function updateScene(mutator: (s: EditorScene) => EditorScene) {
+    updatePayload((p) => ({
+      ...p,
+      scenes: p.scenes.map((s) => (s.id === p.activeSceneId ? mutator(s) : s)),
+    }))
   }
 
-  async function save() {
-    if (!user) return
-    try {
-      const saved = await saveEditorProject(user.id, {
-        id: projectId,
-        title,
-        kind: payload.slots.filter((s) => s.kind === 'video').length === 1 && payload.slots.length === 1 ? 'video' : 'collage',
-        payload,
-      })
-      setProjectId(saved.id)
-      setProjects((prev) => [saved, ...prev.filter((p) => p.id !== saved.id)])
-      showToast('Project saved. Originals were not changed.')
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Save failed', 'error')
-    }
+  function updateLayer(layerId: string, patch: Partial<EditorLayer>) {
+    updateScene((s) => ({
+      ...s,
+      layers: s.layers.map((l) => (l.id === layerId ? { ...l, ...patch } : l)),
+    }))
+  }
+
+  function setLayout(layout: EditorLayout) {
+    updateScene((s) => ({ ...s, layout, layers: layersForLayout(layout, s.layers) }))
+  }
+
+  function openNewProject() {
+    const p = emptyPayload('1')
+    setPayload(p)
+    setTitle('Untitled')
+    setProjectId(undefined)
+    setSelectedLayerId(p.scenes[0]?.layers[0]?.id ?? null)
+    setMode('edit')
+    setPickerOpen(true)
+    setPickerMode('fill-empty')
+  }
+
+  function openProject(p: EditorProject) {
+    const normalized = normalizePayload(p.payload)
+    setPayload(normalized)
+    setTitle(p.title)
+    setProjectId(p.id)
+    setSelectedLayerId(activeScene(normalized).layers.find((l) => l.fileId)?.id ?? activeScene(normalized).layers[0]?.id ?? null)
+    setMode('edit')
+  }
+
+  function addFilesToScene(files: FileRow[]) {
+    setFileById((prev) => {
+      const next = { ...prev }
+      for (const f of files) next[f.id] = f
+      return next
+    })
+    updateScene((s) => {
+      const layers = s.layers.slice()
+      let fi = 0
+      if (pickerMode === 'replace' && selectedLayerId) {
+        const idx = layers.findIndex((l) => l.id === selectedLayerId)
+        const file = files[0]
+        if (idx >= 0 && file) {
+          const kind = classifyFileKind({ name: file.file_name, mime_type: file.mime_type })
+          if (kind === 'image' || kind === 'video') {
+            layers[idx] = {
+              ...layers[idx]!,
+              fileId: file.id,
+              kind,
+              muted: true,
+              trimStart: 0,
+              trimEnd: null,
+            }
+          }
+        }
+        return { ...s, layers }
+      }
+      for (let i = 0; i < layers.length && fi < files.length; i++) {
+        if (layers[i]!.fileId) continue
+        const file = files[fi++]!
+        const kind = classifyFileKind({ name: file.file_name, mime_type: file.mime_type })
+        if (kind !== 'image' && kind !== 'video') continue
+        layers[i] = {
+          ...layers[i]!,
+          fileId: file.id,
+          kind,
+          muted: true,
+          trimStart: 0,
+          trimEnd: null,
+          photoDuration: 3,
+        }
+      }
+      // If still files left and layout can grow up to 4, expand layout.
+      while (fi < files.length && layers.length < 4) {
+        const file = files[fi++]!
+        const kind = classifyFileKind({ name: file.file_name, mime_type: file.mime_type })
+        if (kind !== 'image' && kind !== 'video') continue
+        layers.push({
+          ...emptyLayer(),
+          fileId: file.id,
+          kind,
+          muted: true,
+        })
+      }
+      const layout: EditorLayout =
+        layers.length <= 1 ? '1' : layers.length === 2 ? s.layout === '2x1' ? '2x1' : '1x2' : layers.length === 3 ? '1+2' : '2x2'
+      const fitted = layersForLayout(layout, layers)
+      return { ...s, layout, layers: fitted }
+    })
+    setPickerOpen(false)
+    showToast(`Added ${files.length} to project · originals untouched`)
   }
 
   async function exportNew() {
@@ -148,7 +229,7 @@ export function Editor() {
         showToast(result.error, 'error')
         return
       }
-      showToast(`Export queued as new file “${result.fileName}”. Originals untouched; ready after verify.`)
+      showToast(`Exported “${result.fileName}” as new Vault media`)
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Export failed', 'error')
     } finally {
@@ -156,291 +237,449 @@ export function Editor() {
     }
   }
 
-  function chooseFile(file: FileRow) {
-    if (slotIndex == null) return
-    const kind = classifyFileKind({ name: file.file_name, mime_type: file.mime_type })
-    if (kind !== 'image' && kind !== 'video') return
-    setFileById((prev) => ({ ...prev, [file.id]: file }))
-    updateSlot(slotIndex, {
-      fileId: file.id,
-      kind,
-      muted: kind === 'video' ? slotIndex !== payload.audioMasterIndex : true,
-    })
-    setPickerOpen(false)
+  function togglePlay() {
+    const next = !playing
+    setPlaying(next)
+    for (const layer of scene.layers) {
+      const el = videoRefs.current[layer.id]
+      if (!el) continue
+      if (next) {
+        el.currentTime = Math.max(layer.trimStart, el.currentTime)
+        void el.play().catch(() => {})
+      } else el.pause()
+    }
+  }
+
+  if (mode === 'home') {
+    return (
+      <div className="dashboard editor-page editor-page--home">
+        <main className="dashboard__main">
+          <div className="dashboard__toolbar">
+            <div>
+              <h1 className="dashboard__title">Editor</h1>
+              <p className="dashboard__subtitle">Projects autosave. Originals never change.</p>
+            </div>
+            <button type="button" className="btn btn--primary" onClick={openNewProject}>
+              New project
+            </button>
+          </div>
+          <h2 className="settings-section__heading">Saved projects</h2>
+          {projects.length === 0 ? (
+            <div className="vault-empty">No projects yet. Start one with New project.</div>
+          ) : (
+            <ul className="editor-project-list">
+              {projects.map((p) => {
+                const media = projectMediaCount(p.payload)
+                const dur = projectDurationSec(p.payload)
+                return (
+                  <li key={p.id} className="editor-project-card">
+                    <button type="button" className="editor-project-card__main" onClick={() => openProject(p)}>
+                      <strong>{p.title || 'Untitled'}</strong>
+                      <span className="muted">
+                        {media} media · {p.payload.scenes.length} scene{p.payload.scenes.length === 1 ? '' : 's'}
+                        {dur > 0 ? ` · ~${Math.round(dur)}s` : ''} · {new Date(p.updated_at).toLocaleString()}
+                      </span>
+                    </button>
+                    <div className="editor-project-card__actions">
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => {
+                          if (!user) return
+                          void duplicateEditorProject(user.id, p).then((d) => {
+                            setProjects((prev) => [d, ...prev])
+                            showToast('Duplicated')
+                          })
+                        }}
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => {
+                          if (!user) return
+                          if (!window.confirm(`Delete project “${p.title}”? Source Vault media is kept.`)) return
+                          void deleteEditorProject(user.id, p.id).then(() => {
+                            setProjects((prev) => prev.filter((x) => x.id !== p.id))
+                            showToast('Project deleted')
+                          })
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </main>
+      </div>
+    )
   }
 
   return (
-    <div className="dashboard editor-page">
-      <main className="dashboard__main">
-        <div className="dashboard__toolbar">
-          <div>
-            <h1 className="dashboard__title">Editor</h1>
-            <p className="dashboard__subtitle">Non-destructive collage. Originals stay untouched.</p>
-          </div>
-          <button type="button" className="btn btn--primary" onClick={() => void save()}>
-            Save project
+    <div className="dashboard editor-page editor-page--workspace">
+      <main className="dashboard__main editor-workspace">
+        <div className="editor-workspace__bar">
+          <button type="button" className="btn btn--ghost" onClick={() => setMode('home')}>
+            Projects
+          </button>
+          <input
+            className="field-input editor-workspace__title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            aria-label="Project name"
+          />
+          <button type="button" className="btn btn--outline" disabled={exporting || !exportCaps.canvas} onClick={() => void exportNew()}>
+            {exporting ? '…' : 'Export'}
+          </button>
+        </div>
+
+        <div className={`editor-canvas editor-canvas--${scene.layout === '1+2' ? 'plus' : scene.layout}`}>
+          {scene.layers.map((layer) => (
+            <button
+              key={layer.id}
+              type="button"
+              className={`editor-slot ${selectedLayerId === layer.id ? 'is-on' : ''}`}
+              onClick={() => {
+                setSelectedLayerId(layer.id)
+                if (!layer.fileId) {
+                  setPickerMode('fill-empty')
+                  setPickerOpen(true)
+                }
+              }}
+            >
+              {layer.fileId ? (
+                <EditorLayerPreview
+                  file={fileById[layer.fileId]}
+                  layer={layer}
+                  playing={playing}
+                  audioMaster={payload.audioMasterLayerId === layer.id}
+                  videoRef={(el) => {
+                    videoRefs.current[layer.id] = el
+                  }}
+                  onDuration={(d) => {
+                    if (layer.id === selectedLayer?.id) setSourceDuration(d)
+                  }}
+                  onTime={(t) => {
+                    if (layer.id === selectedLayer?.id) setSeekTime(t)
+                  }}
+                />
+              ) : (
+                <span className="editor-slot__empty">Tap to add</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="editor-workspace__transport">
+          <button type="button" className="btn btn--outline" onClick={togglePlay}>
+            {playing ? 'Pause' : 'Play'}
           </button>
           <button
             type="button"
-            className="btn btn--outline"
-            disabled={exporting || !exportCaps.canvas}
-            onClick={() => void exportNew()}
+            className="btn btn--primary"
+            onClick={() => {
+              setPickerMode('fill-empty')
+              setPickerOpen(true)
+            }}
           >
-            {exporting ? 'Exporting…' : 'Export as new'}
+            Add media
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => {
+              const s = emptyScene(scene.layout)
+              updatePayload((p) => ({
+                ...p,
+                scenes: [...p.scenes, s],
+                activeSceneId: s.id,
+              }))
+              setSelectedLayerId(s.layers[0]?.id ?? null)
+            }}
+          >
+            + Scene
           </button>
         </div>
-        <div className="library-controls__row">
-          <input className="field-input" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Project title" />
+
+        <div className="editor-scene-strip" aria-label="Scenes">
+          {payload.scenes.map((s, idx) => (
+            <button
+              key={s.id}
+              type="button"
+              className={`editor-scene-chip ${s.id === payload.activeSceneId ? 'is-active' : ''}`}
+              onClick={() => {
+                updatePayload((p) => ({ ...p, activeSceneId: s.id }))
+                setSelectedLayerId(s.layers.find((l) => l.fileId)?.id ?? s.layers[0]?.id ?? null)
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                if (payload.scenes.length <= 1) return
+                if (!window.confirm('Remove this scene from the project?')) return
+                updatePayload((p) => {
+                  const scenes = p.scenes.filter((x) => x.id !== s.id)
+                  return { ...p, scenes, activeSceneId: scenes[0]!.id }
+                })
+              }}
+            >
+              Scene {idx + 1}
+            </button>
+          ))}
         </div>
-        <div className="library-controls__row">
+
+        <div className="library-controls__row editor-layouts">
           {LAYOUTS.map((l) => (
             <button
               key={l.id}
               type="button"
-              className={`btn btn--ghost ${payload.layout === l.id ? 'is-on' : ''}`}
+              className={`btn btn--ghost ${scene.layout === l.id ? 'is-on' : ''}`}
               onClick={() => setLayout(l.id)}
             >
               {l.label}
             </button>
           ))}
         </div>
-        <div className={`editor-canvas editor-canvas--${payload.layout === '1+2' ? 'plus' : payload.layout}`}>
-          {payload.slots.map((slot, i) => (
-            <button
-              key={i}
-              type="button"
-              className={`editor-slot ${slotIndex === i ? 'is-on' : ''}`}
-              onClick={() => {
-                setSlotIndex(i)
-                if (!slot.fileId) setPickerOpen(true)
-              }}
-            >
-              {slot.fileId ? (
-                <EditorSlotPreview file={fileById[slot.fileId]} fileId={slot.fileId} objectFit={slot.objectFit} />
-              ) : (
-                <span>Tap to choose media</span>
-              )}
-            </button>
-          ))}
-        </div>
-        {slotIndex != null && payload.slots[slotIndex] ? (
-          <EditorSlotTools
-            slot={payload.slots[slotIndex]!}
-            file={payload.slots[slotIndex]!.fileId ? fileById[payload.slots[slotIndex]!.fileId!] : undefined}
-            onChange={(patch) => updateSlot(slotIndex, patch)}
-            onReplace={() => setPickerOpen(true)}
-            onRemove={() => updateSlot(slotIndex, emptyPayload().slots[0]!)}
-            onAudioMaster={() => setPayload({ ...payload, audioMasterIndex: slotIndex })}
-          />
-        ) : null}
-        {pickerOpen ? (
-          <div className="sheet-root">
-            <button type="button" className="sheet-backdrop" aria-label="Close picker" onClick={() => setPickerOpen(false)} />
-            <div className="sheet sheet--tall" role="dialog" aria-label="Choose media">
-              <div className="sheet__handle" />
-              <h2 className="sheet__title">Choose media</h2>
-              <div className="editor-picker-grid">
-                {picker.map((f) => {
-                  const kind = classifyFileKind({ name: f.file_name, mime_type: f.mime_type })
-                  if (kind !== 'image' && kind !== 'video') return null
-                  return (
-                    <button key={f.id} type="button" className="editor-picker-tile" onClick={() => chooseFile(f)}>
-                      {user ? <VaultPhotoTileMedia file={f} userId={user.id} /> : null}
-                    </button>
-                  )
-                })}
-              </div>
-              {pickerCursor ? (
-                <button
-                  type="button"
-                  className="btn btn--outline"
-                  onClick={() => {
-                    if (!user) return
-                    void listMediaPage({ userId: user.id, filters: DEFAULT_MEDIA_FILTERS, cursor: pickerCursor, limit: 48 }).then((p) => {
-                      setPicker((prev) => [...prev, ...p.rows])
-                      setPickerCursor(p.nextCursor)
-                      setFileById((prev) => {
-                        const next = { ...prev }
-                        for (const r of p.rows) next[r.id] = r
-                        return next
-                      })
-                    })
-                  }}
-                >
-                  Load more
-                </button>
-              ) : null}
+
+        {selectedLayer ? (
+          <div className="editor-tools">
+            <div className="library-controls__row">
+              <button
+                type="button"
+                className="btn btn--outline"
+                onClick={() => {
+                  setPickerMode('replace')
+                  setPickerOpen(true)
+                }}
+              >
+                Replace
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => updateLayer(selectedLayer.id, { ...emptyLayer(), id: selectedLayer.id })}
+              >
+                Remove
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() =>
+                  updateLayer(selectedLayer.id, {
+                    objectFit: selectedLayer.objectFit === 'cover' ? 'contain' : 'cover',
+                  })
+                }
+              >
+                {selectedLayer.objectFit === 'cover' ? 'Fit' : 'Fill'}
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => updateLayer(selectedLayer.id, { zoom: 1, panX: 0, panY: 0 })}
+              >
+                Reset view
+              </button>
             </div>
+
+            <div className="editor-tools__gestures">
+              <label>
+                Zoom
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.05}
+                  value={selectedLayer.zoom}
+                  onChange={(e) => updateLayer(selectedLayer.id, { zoom: Number(e.target.value) })}
+                />
+              </label>
+              <label>
+                Pan X
+                <input
+                  type="range"
+                  min={-0.4}
+                  max={0.4}
+                  step={0.01}
+                  value={selectedLayer.panX}
+                  onChange={(e) => updateLayer(selectedLayer.id, { panX: Number(e.target.value) })}
+                />
+              </label>
+              <label>
+                Pan Y
+                <input
+                  type="range"
+                  min={-0.4}
+                  max={0.4}
+                  step={0.01}
+                  value={selectedLayer.panY}
+                  onChange={(e) => updateLayer(selectedLayer.id, { panY: Number(e.target.value) })}
+                />
+              </label>
+            </div>
+
+            {selectedLayer.kind === 'video' ? (
+              <>
+                <EditorTimeline
+                  layer={selectedLayer}
+                  duration={sourceDuration || Math.max(selectedLayer.trimEnd ?? 0, selectedLayer.trimStart + 1)}
+                  currentTime={seekTime}
+                  onChange={(patch) => updateLayer(selectedLayer.id, patch)}
+                  onSeek={(t) => {
+                    setSeekTime(t)
+                    const el = videoRefs.current[selectedLayer.id]
+                    if (el) el.currentTime = t
+                  }}
+                />
+                <div className="library-controls__row">
+                  {SPEEDS.map((sp) => (
+                    <button
+                      key={sp}
+                      type="button"
+                      className={`btn btn--ghost ${selectedLayer.speed === sp ? 'is-on' : ''}`}
+                      onClick={() => {
+                        updateLayer(selectedLayer.id, { speed: sp })
+                        const el = videoRefs.current[selectedLayer.id]
+                        if (el) el.playbackRate = sp
+                      }}
+                    >
+                      {sp}x
+                    </button>
+                  ))}
+                </div>
+                <div className="library-controls__row">
+                  <button
+                    type="button"
+                    className="btn btn--outline"
+                    onClick={() => updateLayer(selectedLayer.id, { muted: !selectedLayer.muted })}
+                  >
+                    {selectedLayer.muted ? 'Unmute' : 'Mute'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() =>
+                      updatePayload((p) => ({
+                        ...p,
+                        audioMasterLayerId: selectedLayer.id,
+                        scenes: p.scenes.map((sc) => ({
+                          ...sc,
+                          layers: sc.layers.map((l) => ({
+                            ...l,
+                            muted: l.id === selectedLayer.id ? false : true,
+                          })),
+                        })),
+                      }))
+                    }
+                  >
+                    Solo audio
+                  </button>
+                  <label className="editor-volume">
+                    Vol
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={selectedLayer.volume}
+                      onChange={(e) => {
+                        const volume = Number(e.target.value)
+                        updateLayer(selectedLayer.id, { volume, muted: volume === 0 })
+                        const el = videoRefs.current[selectedLayer.id]
+                        if (el) el.volume = volume
+                      }}
+                    />
+                  </label>
+                </div>
+              </>
+            ) : selectedLayer.kind === 'image' ? (
+              <label className="filter-bar__num">
+                Photo duration (s)
+                <input
+                  className="field-input"
+                  type="number"
+                  min={0.5}
+                  step={0.5}
+                  value={selectedLayer.photoDuration}
+                  onChange={(e) => updateLayer(selectedLayer.id, { photoDuration: Math.max(0.5, Number(e.target.value) || 3) })}
+                />
+              </label>
+            ) : null}
           </div>
         ) : null}
-        <p className="dashboard__subtitle">
-          Export as new creates a JPEG collage via the normal upload + verify path. Originals are never overwritten.
-          {exportCaps.mediaRecorder
-            ? ' Video collage export is not enabled yet — save the project instead.'
-            : ' MediaRecorder unavailable; image export still works when canvas is available.'}
-        </p>
-        <h2 className="settings-section__heading">Saved projects</h2>
-        <ul className="deleted-list">
-          {projects.map((p) => (
-            <li key={p.id} className="deleted-row">
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => {
-                  setProjectId(p.id)
-                  setTitle(p.title)
-                  setPayload(p.payload)
-                }}
-              >
-                {p.title}
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => {
-                  if (!user) return
-                  void deleteEditorProject(user.id, p.id).then(() => setProjects((prev) => prev.filter((x) => x.id !== p.id)))
-                }}
-              >
-                Delete project
-              </button>
-            </li>
-          ))}
-        </ul>
       </main>
+
+      {user ? (
+        <EditorMediaPicker
+          open={pickerOpen}
+          userId={user.id}
+          onClose={() => setPickerOpen(false)}
+          onAdd={addFilesToScene}
+          maxSelect={pickerMode === 'replace' ? 1 : 4}
+        />
+      ) : null}
     </div>
   )
 }
 
-function EditorSlotPreview({
+function EditorLayerPreview({
   file,
-  fileId,
-  objectFit,
+  layer,
+  audioMaster,
+  videoRef,
+  onDuration,
+  onTime,
 }: {
   file?: FileRow
-  fileId: string
-  objectFit: 'cover' | 'contain'
+  layer: EditorLayer
+  playing: boolean
+  audioMaster: boolean
+  videoRef: (el: HTMLVideoElement | null) => void
+  onDuration: (d: number) => void
+  onTime: (t: number) => void
 }) {
   const { displayUrl, loading, failed } = useDecryptedMediaSrc(
     file?.file_url ?? null,
     file?.is_encrypted,
     file?.user_id ?? null,
     file?.file_name ?? '',
-    fileId,
+    layer.fileId,
   )
   const kind = classifyFileKind({ name: file?.file_name, mime_type: file?.mime_type })
-  if (loading || (!displayUrl && !failed)) return <div className="editor-slot__skeleton" aria-hidden />
-  if (failed || !displayUrl) return <span>Could not load preview</span>
-  if (kind === 'video' || file?.mime_type?.startsWith('video/')) {
-    return <video src={displayUrl} muted playsInline preload="metadata" style={{ objectFit }} />
+  const style: CSSProperties = {
+    objectFit: layer.objectFit,
+    transform: `translate(${layer.panX * 100}%, ${layer.panY * 100}%) scale(${layer.zoom})`,
+    transformOrigin: 'center center',
   }
-  return <img src={displayUrl} alt="" style={{ objectFit }} />
-}
 
-function EditorSlotTools({
-  slot,
-  file,
-  onChange,
-  onReplace,
-  onRemove,
-  onAudioMaster,
-}: {
-  slot: EditorSlot
-  file?: FileRow
-  onChange: (patch: Partial<EditorSlot>) => void
-  onReplace: () => void
-  onRemove: () => void
-  onAudioMaster: () => void
-}) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const { displayUrl } = useDecryptedMediaSrc(file?.file_url ?? null, file?.is_encrypted, file?.user_id ?? null, file?.file_name ?? '', slot.fileId)
-  const isVideo = slot.kind === 'video'
-
-  return (
-    <div className="editor-tools">
-      <div className="library-controls__row">
-        <button type="button" className="btn btn--outline" onClick={onReplace}>
-          Replace
-        </button>
-        <button type="button" className="btn btn--ghost" onClick={onRemove}>
-          Remove
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost"
-          onClick={() => onChange({ objectFit: slot.objectFit === 'cover' ? 'contain' : 'cover' })}
-        >
-          {slot.objectFit === 'cover' ? 'Fill' : 'Fit'}
-        </button>
-      </div>
-      {isVideo && displayUrl ? (
-        <div className="editor-video-tools">
-          <video
-            ref={videoRef}
-            src={displayUrl}
-            muted={slot.muted}
-            playsInline
-            controls={false}
-            preload="metadata"
-            className="editor-video-tools__preview"
-          />
-          <div className="library-controls__row">
-            <button
-              type="button"
-              className="btn btn--outline"
-              onClick={() => {
-                const el = videoRef.current
-                if (!el) return
-                if (el.paused) void el.play().catch(() => {})
-                else el.pause()
-              }}
-            >
-              Play / Pause
-            </button>
-            <button type="button" className="btn btn--ghost" onClick={() => onChange({ muted: !slot.muted })}>
-              {slot.muted ? 'Unmute' : 'Mute'}
-            </button>
-            <button type="button" className="btn btn--ghost" onClick={onAudioMaster}>
-              Audio master
-            </button>
-          </div>
-          <label className="filter-bar__num">
-            Scrub
-            <input
-              className="field-input"
-              type="range"
-              min={0}
-              max={1000}
-              defaultValue={0}
-              onChange={(e) => {
-                const el = videoRef.current
-                if (!el || !Number.isFinite(el.duration)) return
-                el.currentTime = (Number(e.target.value) / 1000) * el.duration
-              }}
-            />
-          </label>
-          <label className="filter-bar__num">
-            Trim start (s)
-            <input
-              className="field-input"
-              type="number"
-              min={0}
-              value={slot.trimStart}
-              onChange={(e) => onChange({ trimStart: Number(e.target.value) || 0 })}
-            />
-          </label>
-          <label className="filter-bar__num">
-            Trim end (s)
-            <input
-              className="field-input"
-              type="number"
-              min={0}
-              value={slot.trimEnd ?? ''}
-              onChange={(e) => onChange({ trimEnd: e.target.value === '' ? null : Number(e.target.value) })}
-            />
-          </label>
-        </div>
-      ) : null}
-    </div>
-  )
+  if (loading || (!displayUrl && !failed)) return <div className="editor-slot__skeleton" aria-hidden />
+  if (failed || !displayUrl) return <span>Preview unavailable</span>
+  if (kind === 'video' || file?.mime_type?.startsWith('video/')) {
+    return (
+      <video
+        ref={videoRef}
+        src={displayUrl}
+        muted={layer.muted || !audioMaster}
+        playsInline
+        preload="metadata"
+        style={style}
+        onLoadedMetadata={(e) => {
+          onDuration(e.currentTarget.duration || 0)
+          e.currentTarget.playbackRate = layer.speed || 1
+          e.currentTarget.volume = layer.volume ?? 1
+          if (layer.trimStart > 0) e.currentTarget.currentTime = layer.trimStart
+        }}
+        onTimeUpdate={(e) => {
+          onTime(e.currentTarget.currentTime)
+          const end = layer.trimEnd
+          if (end != null && e.currentTarget.currentTime >= end) {
+            e.currentTarget.pause()
+            e.currentTarget.currentTime = layer.trimStart
+          }
+        }}
+      />
+    )
+  }
+  return <img src={displayUrl} alt="" style={style} />
 }

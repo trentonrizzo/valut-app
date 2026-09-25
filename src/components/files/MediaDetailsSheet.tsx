@@ -3,10 +3,15 @@ import type { FileRow } from '../../types/media'
 import { formatBytes } from '../../lib/formatBytes'
 import { loadMediaDetails, type MediaDetailsModel } from '../../lib/mediaDetails'
 import { useAuth } from '../../context/useAuth'
+import { useToast } from '../../context/useToast'
+import { addTagsToFiles, removeTagsFromFiles } from '../../lib/tags'
+import { TagPickerModal } from '../library/TagPickerModal'
+import { setFavorite } from '../../lib/albumMembership'
 
 type Props = {
   file: FileRow | null
   onClose: () => void
+  onChanged?: () => void
 }
 
 function fmtDate(iso: string | null | undefined): string {
@@ -24,16 +29,20 @@ function fmtDuration(ms: number | null | undefined): string {
   return m > 0 ? `${m}m ${r}s` : `${r}s`
 }
 
-export function MediaDetailsSheet({ file, onClose }: Props) {
+export function MediaDetailsSheet({ file, onClose, onChanged }: Props) {
   const { user } = useAuth()
+  const { showToast } = useToast()
   const [model, setModel] = useState<MediaDetailsModel | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [tagModal, setTagModal] = useState<'add' | 'remove' | null>(null)
+  const [favorite, setFavoriteLocal] = useState(false)
 
   useEffect(() => {
     if (!file || !user) {
       setModel(null)
       return
     }
+    setFavoriteLocal(Boolean(file.favorite))
     let cancelled = false
     setError(null)
     void loadMediaDetails(user.id, file)
@@ -67,7 +76,7 @@ export function MediaDetailsSheet({ file, onClose }: Props) {
     },
     { label: 'Resolution', value: model?.resolutionLabel || '—' },
     { label: 'Aspect ratio', value: model?.aspectRatio || '—' },
-    { label: 'Favorite', value: file.favorite ? 'Yes' : 'No' },
+    { label: 'Favorite', value: favorite ? 'Yes' : 'No' },
     { label: 'Duplicate', value: model?.duplicateHint || 'Not indexed / unique' },
     {
       label: 'Source URL',
@@ -105,15 +114,83 @@ export function MediaDetailsSheet({ file, onClose }: Props) {
           </div>
           <div className="media-details__row">
             <dt>Tags</dt>
-            <dd>
-              {model?.tags?.length ? model.tags.map((t) => t.name).join(', ') : model ? 'None' : '…'}
+            <dd className="media-details__tags">
+              {model?.tags?.length ? (
+                <div className="tag-chip-row">
+                  {model.tags.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className="filter-chip"
+                      onClick={() => {
+                        if (!user) return
+                        void removeTagsFromFiles(user.id, [file.id], [t.id])
+                          .then(() => {
+                            setModel((m) => (m ? { ...m, tags: m.tags.filter((x) => x.id !== t.id) } : m))
+                            showToast(`Removed “${t.name}”`)
+                            onChanged?.()
+                          })
+                          .catch((e) => showToast(e instanceof Error ? e.message : 'Remove failed', 'error'))
+                      }}
+                      aria-label={`Remove tag ${t.name}`}
+                    >
+                      {t.name} ×
+                    </button>
+                  ))}
+                </div>
+              ) : model ? (
+                'None'
+              ) : (
+                '…'
+              )}
             </dd>
           </div>
         </dl>
-        <button type="button" className="btn btn--outline btn--block" onClick={onClose}>
-          Close
-        </button>
+        <div className="sheet__stack">
+          <button type="button" className="btn btn--outline" onClick={() => setTagModal('add')}>
+            + Add tags
+          </button>
+          <button
+            type="button"
+            className="btn btn--outline"
+            onClick={() => {
+              if (!user) return
+              const next = !favorite
+              void setFavorite(user.id, [file.id], next)
+                .then(() => {
+                  setFavoriteLocal(next)
+                  showToast(next ? 'Favorited' : 'Unfavorited')
+                  onChanged?.()
+                })
+                .catch((e) => showToast(e instanceof Error ? e.message : 'Favorite failed', 'error'))
+            }}
+          >
+            {favorite ? 'Unfavorite' : 'Favorite'}
+          </button>
+          <button type="button" className="btn btn--outline btn--block" onClick={onClose}>
+            Close
+          </button>
+        </div>
       </div>
+      <TagPickerModal
+        open={tagModal !== null}
+        userId={user?.id ?? ''}
+        mode={tagModal ?? 'add'}
+        onClose={() => setTagModal(null)}
+        onApply={async (tagIds) => {
+          if (!user) return
+          try {
+            await addTagsToFiles(user.id, [file.id], tagIds)
+            const refreshed = await loadMediaDetails(user.id, file)
+            setModel(refreshed)
+            setTagModal(null)
+            showToast('1 item tagged')
+            onChanged?.()
+          } catch (e) {
+            showToast(e instanceof Error ? e.message : 'Tag failed', 'error')
+          }
+        }}
+      />
     </div>
   )
 }

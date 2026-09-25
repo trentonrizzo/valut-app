@@ -6,9 +6,12 @@ import { supabase } from '../lib/supabase'
 import { buildAlbumsWithMeta, fetchAlbumsWithCounts } from '../lib/albumQueries'
 import { isAlbumGalleryFile, listAlbumMemberFiles, reconcileLegacyAlbumMemberships } from '../lib/albumMembers'
 import { albumViewAllowed, clearAlbumPassword, setAlbumPassword, verifyAlbumPassword } from '../lib/albumPin'
-import { addFilesToAlbum, moveFilesToAlbum, removeFilesFromAlbum } from '../lib/albumMembership'
+import { addFilesToAlbum, moveFilesToAlbum, removeFilesFromAlbum, setFavorite } from '../lib/albumMembership'
 import { softDeleteFiles } from '../lib/trash'
 import { BulkActionBar } from '../components/library/BulkActionBar'
+import { TagPickerModal } from '../components/library/TagPickerModal'
+import { addTagsToFiles, removeTagsFromFiles } from '../lib/tags'
+import { useMediaSelection } from '../context/SelectionContext'
 import { isV11SchemaReady } from '../lib/schemaGuard'
 import { formatBytes } from '../lib/formatBytes'
 import { isVideoFileName } from '../lib/mediaTypes'
@@ -93,8 +96,14 @@ export function Dashboard() {
   const [unlockPin, setUnlockPin] = useState('')
   const [albumUnlocked, setAlbumUnlocked] = useState(0)
   const [albumSelected, setAlbumSelected] = useState<Set<string>>(new Set())
+  const [tagModal, setTagModal] = useState<'add' | 'remove' | null>(null)
+  const { setSelectedFileIds } = useMediaSelection()
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set())
   const [creatingAlbum, setCreatingAlbum] = useState(false)
+
+  useEffect(() => {
+    setSelectedFileIds([...albumSelected])
+  }, [albumSelected, setSelectedFileIds])
 
   type FileRow = {
     id: string
@@ -110,6 +119,7 @@ export function Dashboard() {
     storage_key?: string | null
     thumbnail_key?: string | null
     poster_key?: string | null
+    favorite?: boolean | null
   }
 
   function isGalleryFile(f: { purpose?: string | null; upload_status?: string | null; deleted_at?: string | null }): boolean {
@@ -1044,10 +1054,19 @@ export function Dashboard() {
                 setAlbumSelected(new Set())
                 showToast('Removed from album')
               }}
-              onFavorite={() => {}}
-              onAddTags={() => showToast('Tag from Library')}
-              onRemoveTags={() => {}}
-              onDownload={() => {}}
+              onFavorite={async (on) => {
+                if (!user || albumSelected.size === 0) return
+                try {
+                  await setFavorite(user.id, [...albumSelected], on)
+                  setFiles((prev) => prev.map((f) => (albumSelected.has(f.id) ? { ...f, favorite: on } : f)))
+                  showToast(on ? `${albumSelected.size} favorited` : `${albumSelected.size} unfavorited`)
+                } catch (e) {
+                  showToast(e instanceof Error ? e.message : 'Favorite failed', 'error')
+                }
+              }}
+              onAddTags={() => setTagModal('add')}
+              onRemoveTags={() => setTagModal('remove')}
+              onDownload={() => showToast('Open an item to download, or use Library multi-select download')}
               onDelete={async () => {
                 if (!user || albumSelected.size === 0) return
                 if (!window.confirm(`Move ${albumSelected.size} item(s) to Recently Deleted?`)) return
@@ -1057,6 +1076,30 @@ export function Dashboard() {
                 showToast('Moved to Recently Deleted')
               }}
             />
+            {tagModal ? (
+              <TagPickerModal
+                open
+                userId={user?.id ?? ''}
+                mode={tagModal}
+                onClose={() => setTagModal(null)}
+                onApply={async (tagIds) => {
+                  if (!user) return
+                  const ids = [...albumSelected]
+                  try {
+                    if (tagModal === 'add') {
+                      await addTagsToFiles(user.id, ids, tagIds)
+                      showToast(`${ids.length} item(s) tagged`)
+                    } else {
+                      await removeTagsFromFiles(user.id, ids, tagIds)
+                      showToast(`Tags removed from ${ids.length} item(s)`)
+                    }
+                    setTagModal(null)
+                  } catch (e) {
+                    showToast(e instanceof Error ? e.message : 'Tag update failed', 'error')
+                  }
+                }}
+              />
+            ) : null}
             {filesError ? (
             <div className="banner banner--error" role="alert">
               <strong>Could not load files.</strong> {filesError}

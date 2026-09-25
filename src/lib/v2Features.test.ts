@@ -109,15 +109,15 @@ describe('locks and album PIN session', () => {
 })
 
 describe('editor projects do not rewrite originals', () => {
-  it('creates slot state that only references file ids', () => {
+  it('creates layer state that only references file ids', () => {
     const p = emptyPayload('2x2')
-    expect(p.slots).toHaveLength(4)
-    expect(p.slots.every((s) => s.fileId === null)).toBe(true)
+    expect(p.scenes[0]?.layers).toHaveLength(4)
+    expect(p.scenes[0]?.layers.every((s) => s.fileId === null)).toBe(true)
     const src = readFileSync(join(root, 'src/lib/editor/projects.ts'), 'utf8')
     expect(src).not.toContain('DeleteObject')
     expect(src).toContain('editor_projects')
     const editor = readFileSync(join(root, 'src/pages/Editor.tsx'), 'utf8')
-    expect(editor).toContain('VaultPhotoTileMedia')
+    expect(editor).toContain('EditorLayerPreview')
     expect(editor).toContain('useDecryptedMediaSrc')
     expect(editor).not.toContain('r2://')
   })

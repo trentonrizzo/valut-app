@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
-import { createTag, listTags, normalizeTagName } from '../lib/tags'
+import { createTag, listTags, renameTag } from '../lib/tags'
 import { supabase } from '../lib/supabase'
 
 type TagRow = Awaited<ReturnType<typeof listTags>>[number]
@@ -57,12 +57,12 @@ export function TagsPage() {
     if (!user) return
     const next = window.prompt('Rename tag', tag.name)
     if (!next || next.trim() === tag.name) return
-    const normalized = normalizeTagName(next).name
-    const { error } = await supabase.from('tags').update({ name: normalized }).eq('id', tag.id).eq('user_id', user.id)
-    if (error) setNotice(error.message)
-    else {
+    try {
+      await renameTag(user.id, tag.id, next)
       setNotice('Renamed')
       await refresh()
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : 'Rename failed')
     }
   }
 

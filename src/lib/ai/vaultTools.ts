@@ -151,8 +151,20 @@ export async function runVaultTool(
         return { ok: true, tool: call.name, summary: `✓ Renamed tag to “${name}”`, verified: true }
       }
       case 'assign_tag': {
-        const tagIds = asStringArray(call.args.tagIds)
         const fileIds = asStringArray(call.args.fileIds)
+        let tagIds = asStringArray(call.args.tagIds)
+        const tagNames = asStringArray(call.args.tagNames)
+        if (!tagIds.length && tagNames.length) {
+          const all = await listTags(userId)
+          for (const name of tagNames) {
+            const existing = all.find((t) => t.name.toLowerCase() === name.toLowerCase())
+            if (existing) tagIds.push(existing.id)
+            else {
+              const created = await createTag(userId, name)
+              tagIds.push(created.id)
+            }
+          }
+        }
         if (!tagIds.length || !fileIds.length) throw new Error('tagIds and fileIds required')
         await addTagsToFiles(userId, fileIds, tagIds)
         return { ok: true, tool: call.name, summary: `✓ Tagged ${fileIds.length} item(s)`, verified: true }
@@ -542,11 +554,13 @@ export function planFromPrompt(prompt: string, uiScope?: VaultToolContext['uiSco
   }
   if (/person group|people group/i.test(lower)) calls.push({ name: 'list_person_groups', args: {} })
 
-  const createTagM = text.match(/(?:create|make|add)(?:\s+a)?\s+tag(?:\s+called|\s+named)?\s+["']?([^"'.]+)["']?/i)
+  const createTagM = text.match(
+    /(?:create|make|add)(?:\s+me)?(?:\s+a)?\s+tag(?:\s+called|\s+named)?\s+["']?([^"'.]+)["']?/i,
+  )
   if (createTagM) calls.push({ name: 'create_tag', args: { name: normalizeTagName(createTagM[1]!).name } })
 
   const createAlbumM = text.match(
-    /(?:create|make|add)(?:\s+an?)?(?:\s+new)?\s+(?:album|collection)(?:\s+called|\s+named)?\s+["']?([^"'.]+)["']?/i,
+    /(?:create|make|add)(?:\s+me)?(?:\s+an?)?(?:\s+new)?\s+(?:album|collection)(?:\s+called|\s+named)?\s+["']?([^"'.]+)["']?/i,
   )
   if (createAlbumM) calls.push({ name: 'create_album', args: { name: stripQuotes(createAlbumM[1]!) } })
 
@@ -554,6 +568,20 @@ export function planFromPrompt(prompt: string, uiScope?: VaultToolContext['uiSco
   const tagged = text.match(/(?:show|find|list|pull up).{0,40}tagged\s+["']?([^"'.]+)["']?/i)
   if (tagged) {
     calls.push({ name: 'search_by_tags', args: { tagNames: [stripQuotes(tagged[1]!)] } })
+  }
+
+  // Tag selected media: "tag these Redhead" / "add tag Blonde to selection"
+  const tagSelected =
+    text.match(/\b(?:tag|tags)\s+(?:these|selected|them|it)(?:\s+as|\s+with)?\s+["']?([^"'.]+)["']?/i) ||
+    text.match(/\b(?:add|apply)\s+tag\s+["']?([^"'.]+)["']?\s+(?:to\s+)?(?:these|selected|them|selection)/i)
+  if (tagSelected && uiScope?.selectedFileIds?.length) {
+    calls.push({
+      name: 'assign_tag',
+      args: {
+        tagNames: [stripQuotes(tagSelected[1]!)],
+        fileIds: uiScope.selectedFileIds,
+      },
+    })
   }
 
   const year = text.match(/\b(19|20)\d{2}\b/)
