@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ProjectWriter, type Draft, type ProjectDocument } from './persistence'
-import { emptyPayload } from './projects'
+import { emptyPayload, emptyTimelinePayload } from './projects'
+import { addClips, createClip } from './timeline'
 function document(id = 'a', title = 'First'): ProjectDocument { return { id, title, payload: emptyPayload() } }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 afterEach(() => vi.useRealTimers())
@@ -73,5 +74,20 @@ describe('serialized project persistence', () => {
     const save = vi.fn(), store = vi.fn()
     const writer = new ProjectWriter({ document: document(), dirty: false, baseUpdatedAt: '1' }, { save, store, online: () => true })
     await writer.flush(); expect(save).not.toHaveBeenCalled(); expect(store).not.toHaveBeenCalled()
+  })
+  it('saves and reloads the exact v3 timeline document through immediate navigation', async () => {
+    const payload = emptyTimelinePayload()
+    payload.timeline = addClips(payload.timeline!, [createClip({ fileId: 'vault-file', mediaType: 'video', sourceDuration: 12 })])
+    const timelineDocument: ProjectDocument = { id: 'timeline-project', title: 'Timeline', payload }
+    let journal: Draft | null = null
+    const save = vi.fn().mockResolvedValue({ updatedAt: 'next' })
+    const writer = new ProjectWriter({ document: timelineDocument, dirty: false, baseUpdatedAt: 'base' }, { save, store: d => { journal = structuredClone(d) }, online: () => true })
+    const edited = structuredClone(timelineDocument)
+    edited.payload.timeline!.tracks[0]!.clips[0]!.speed = 2
+    writer.edit(edited)
+    expect((journal as Draft | null)?.document.payload.timeline?.tracks[0]?.clips[0]?.speed).toBe(2)
+    await writer.flush()
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: 'timeline-project', payload: expect.objectContaining({ version: 3 }) }), 'base')
+    expect(writer.draft.document.payload.timeline?.tracks[0]?.clips[0]?.fileId).toBe('vault-file')
   })
 })

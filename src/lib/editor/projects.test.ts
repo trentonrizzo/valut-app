@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   emptyPayload,
+  emptyTimelinePayload,
   normalizePayload,
   projectMediaCount,
   type EditorProjectPayload,
@@ -47,5 +48,22 @@ describe('editor project payload v2', () => {
     const n = normalizePayload(p)
     expect(n.scenes[0]!.layers[0]!.zoom).toBe(1.5)
     expect(n.scenes[0]!.layers[0]!.photoDuration).toBe(7)
+  })
+})
+
+describe('editor project payload v3', () => {
+  it('creates a continuous timeline without changing v2 defaults', () => {
+    const timeline = emptyTimelinePayload()
+    expect(timeline.version).toBe(3)
+    expect(timeline.timeline?.tracks[0]?.clips).toEqual([])
+    expect(emptyPayload().version).toBe(2)
+  })
+
+  it('normalizes v3 while keeping legacy projects readable', () => {
+    const legacy = emptyPayload()
+    const timeline = normalizePayload(emptyTimelinePayload())
+    expect(normalizePayload(legacy).version).toBe(2)
+    expect(timeline.version).toBe(3)
+    expect(timeline.timeline).toBeTruthy()
   })
 })

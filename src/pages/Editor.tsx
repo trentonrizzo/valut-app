@@ -15,6 +15,7 @@ import {
   duplicateEditorProject,
   emptyLayer,
   emptyPayload,
+  emptyTimelinePayload,
   emptyScene,
   exportSupported,
   layersForLayout,
@@ -33,6 +34,7 @@ import { exportEditorCollageToVault } from '../lib/editor/exportToVault'
 import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
 import { EditorMediaPicker } from '../components/editor/EditorMediaPicker'
 import { EditorTimeline } from '../components/editor/EditorTimeline'
+import { TimelineWorkspace } from '../components/editor/TimelineWorkspace'
 
 const SPEEDS = [0.5, 1, 1.5, 2]
 
@@ -170,7 +172,7 @@ export function Editor() {
   function openNewProject() {
     if (!user) return
     const id = crypto.randomUUID()
-    const draft = { document: { id, title: 'Untitled', payload: emptyPayload('1') }, baseUpdatedAt: null, dirty: false }
+    const draft = { document: { id, title: 'Untitled', payload: emptyTimelinePayload() }, baseUpdatedAt: null, dirty: false }
     try {
       storeDraft(user.id, draft)
       writerFor(user.id, draft)
@@ -313,7 +315,7 @@ export function Editor() {
                     <button type="button" className="editor-project-card__main" onClick={() => openProject(p)}>
                       <strong>{p.title || 'Untitled'}</strong>
                       <span className="muted">
-                        {media} media · {normalized ? `${normalized.scenes.length} scenes` : 'Unsupported format — preserved'}
+                        {media} media · {normalized ? normalized.version === 3 ? 'continuous timeline' : `${normalized.scenes.length} scenes` : 'Unsupported format — preserved'}
                         {dur > 0 ? ` · ~${Math.round(dur)}s` : ''} · {new Date(p.updated_at).toLocaleString()}
                       </span>
                     </button>
@@ -357,6 +359,23 @@ export function Editor() {
   }
 
   if (loadError || loadedId !== routeId) return <main className="dashboard__main"><button className="btn" onClick={() => navigate('/editor')}>Projects</button><p role="status">{loadError || 'Opening project…'}</p></main>
+
+  if (payload.version === 3 && writerRef.current && user && routeId) {
+    return <TimelineWorkspace key={routeId}
+      projectId={routeId}
+      user={user}
+      title={title}
+      payload={payload}
+      writer={writerRef.current}
+      pickerOpen={pickerOpen}
+      setPickerOpen={setPickerOpen}
+      onTitle={(nextTitle) => {
+        setTitle(nextTitle)
+        writerRef.current?.edit({ id: routeId, title: nextTitle, payload })
+      }}
+      onPayload={setPayload}
+    />
+  }
 
   return (
     <div className="dashboard editor-page editor-page--workspace">

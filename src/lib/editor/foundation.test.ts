@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { emptyPayload, layersForLayout, normalizePayload, reflowLayersForLayout, stableDocumentJson } from './projects'
+import { emptyPayload, emptyTimelinePayload, layersForLayout, normalizePayload, reflowLayersForLayout, stableDocumentJson } from './projects'
 import { RequestGeneration, toggleRecord } from './pickerState'
 import { cursorPredicate } from '../mediaCursor'
 
@@ -41,6 +41,14 @@ describe('project compatibility and picker state', () => {
   })
   it('response-loss comparison ignores JSONB object key order', () => {
     expect(stableDocumentJson({ b: 2, a: { d: 4, c: 3 } })).toBe(stableDocumentJson({ a: { c: 3, d: 4 }, b: 2 }))
+  })
+  it('opening a legacy project does not convert or rewrite its raw document', () => {
+    const legacy = emptyPayload('1x2')
+    const before = structuredClone(legacy)
+    const normalized = normalizePayload(legacy)
+    expect(legacy).toEqual(before)
+    expect(normalized.version).toBe(2)
+    expect(emptyTimelinePayload().version).toBe(3)
   })
 })
 

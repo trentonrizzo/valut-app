@@ -1,4 +1,5 @@
 import { supabase } from './../supabase'
+import { emptyTimeline, normalizeTimeline, primaryClips, timelineDuration, type TimelineDocument } from './timeline'
 
 export type EditorLayout = '1' | '1x2' | '2x1' | '1+2' | '2x2'
 
@@ -27,7 +28,7 @@ export type EditorScene = {
 
 /** v2 payload — scenes with up to 4 layers each. Legacy v1 slots still accepted. */
 export type EditorProjectPayload = {
-  version?: 1 | 2
+  version?: 1 | 2 | 3
   [key: string]: unknown
   scenes: EditorScene[]
   activeSceneId: string
@@ -40,6 +41,10 @@ export type EditorProjectPayload = {
   /** @deprecated v1 */
   audioMasterIndex?: number
   multiAudio?: boolean
+  /** v3 continuous primary sequence. v1/v2 scenes remain untouched for legacy projects. */
+  timeline?: TimelineDocument
+  /** Preserves legacy scene data when a user explicitly upgrades in a future flow. */
+  legacyDocument?: Record<string, unknown>
 }
 
 export type EditorSlotV1 = {
@@ -135,10 +140,32 @@ export function emptyPayload(layout: EditorLayout = '1'): EditorProjectPayload {
   }
 }
 
+export function emptyTimelinePayload(): EditorProjectPayload {
+  const scene = emptyScene('1')
+  return {
+    version: 3,
+    scenes: [scene],
+    activeSceneId: scene.id,
+    audioMasterLayerId: null,
+    timeline: emptyTimeline(),
+  }
+}
+
 export function normalizePayload(raw: EditorProjectPayload | Record<string, unknown> | null | undefined): EditorProjectPayload {
   if (!raw || typeof raw !== 'object') return emptyPayload()
   const p = raw as EditorProjectPayload
-  if (p.version != null && p.version !== 1 && p.version !== 2) throw new Error('This project uses a newer format. Its document has not been changed.')
+  if (p.version != null && p.version !== 1 && p.version !== 2 && p.version !== 3) throw new Error('This project uses a newer format. Its document has not been changed.')
+  if (p.version === 3) {
+    const fallbackScene = Array.isArray(p.scenes) && p.scenes[0] ? p.scenes[0] : emptyScene('1')
+    return {
+      ...p,
+      version: 3,
+      scenes: p.scenes?.length ? p.scenes : [fallbackScene],
+      activeSceneId: p.activeSceneId || fallbackScene.id,
+      audioMasterLayerId: p.audioMasterLayerId ?? null,
+      timeline: normalizeTimeline(p.timeline),
+    }
+  }
   if (Array.isArray(p.scenes) && p.scenes.length > 0) {
     const scenes = p.scenes.map((s) => ({
       ...s,
@@ -199,10 +226,12 @@ export function activeScene(payload: EditorProjectPayload): EditorScene {
 }
 
 export function projectMediaCount(payload: EditorProjectPayload): number {
+  if (payload.version === 3 && payload.timeline) return primaryClips(payload.timeline).length
   return payload.scenes.reduce((n, s) => n + s.layers.filter((l) => l.fileId).length, 0)
 }
 
 export function projectDurationSec(payload: EditorProjectPayload): number {
+  if (payload.version === 3 && payload.timeline) return timelineDuration(payload.timeline)
   return payload.scenes.reduce((sum, scene) => {
     const layerDurations = scene.layers
       .filter((l) => l.fileId)
@@ -282,6 +311,9 @@ export function exportSupported(): { mediaRecorder: boolean; canvas: boolean } {
 }
 
 export function inferProjectKind(payload: EditorProjectPayload): 'collage' | 'video' {
+  if (payload.version === 3 && payload.timeline) {
+    return primaryClips(payload.timeline).some((clip) => clip.mediaType === 'video') ? 'video' : 'collage'
+  }
   const layers = payload.scenes.flatMap((s) => s.layers).filter((l) => l.fileId)
   if (layers.length === 1 && layers[0]?.kind === 'video') return 'video'
   if (layers.some((l) => l.kind === 'video')) return 'video'
