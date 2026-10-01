@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { isAlbumGalleryFile, membershipKey, missingLegacyMemberships } from './albumMembers'
+import { albumMemberPagePlan, isAlbumGalleryFile, membershipKey, missingLegacyMemberships } from './albumMembers'
 import { addFilesToAlbum, moveFilesToAlbum, removeFilesFromAlbum } from './albumMembership'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -83,5 +83,12 @@ describe('canonical album_files membership', () => {
       { album_id: 'a2', file_id: 'f1' },
     ]
     expect(missingLegacyMemberships(files, existing)).toEqual([])
+  })
+
+  it('paginates beyond 200 canonical members without repeating the first window', () => {
+    expect(albumMemberPagePlan(250, 0, 48)).toEqual({ canonicalOffset: 0, canonicalLimit: 48, legacyOffset: 0, legacyLimit: 0 })
+    expect(albumMemberPagePlan(250, 192, 48)).toEqual({ canonicalOffset: 192, canonicalLimit: 48, legacyOffset: 0, legacyLimit: 0 })
+    expect(albumMemberPagePlan(250, 240, 48)).toEqual({ canonicalOffset: 240, canonicalLimit: 10, legacyOffset: 0, legacyLimit: 38 })
+    expect(albumMemberPagePlan(250, 288, 48)).toEqual({ canonicalOffset: 250, canonicalLimit: 0, legacyOffset: 38, legacyLimit: 48 })
   })
 })

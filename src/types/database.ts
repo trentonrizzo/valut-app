@@ -1,6 +1,18 @@
+type TableShape<Row, Required extends keyof Row = never> = {
+  Row: Row
+  Insert: Partial<Row> & Pick<Row, Required>
+  Update: Partial<Row>
+  Relationships: []
+}
+
 export interface Database {
   public: {
     Tables: {
+      ai_jobs: TableShape<import('../lib/ai/jobs').AiJobRow, 'user_id' | 'request_text'>
+      vault_links: TableShape<import('../lib/links').VaultLink, 'user_id' | 'url'>
+      album_links: TableShape<{ album_id: string; link_id: string; user_id: string; created_at: string }, 'album_id' | 'link_id' | 'user_id'>
+      link_files: TableShape<{ link_id: string; file_id: string; user_id: string; created_at: string }, 'link_id' | 'file_id' | 'user_id'>
+
       profiles: {
         Row: {
           id: string

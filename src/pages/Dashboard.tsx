@@ -598,10 +598,9 @@ export function Dashboard() {
     setCreatingAlbum(true)
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const payload: Record<string, unknown> = { user_id: user.id, name, order_index: nextOrder }
+      const payload: { user_id: string; name: string; order_index: number; parent_album_id?: string } = { user_id: user.id, name, order_index: nextOrder }
       if (parentId) payload.parent_album_id = parentId
-      const { data, error } = await (supabase as any).from('albums').insert(payload).select().single()
+      const { data, error } = await supabase.from('albums').insert(payload).select().single()
 
       if (error) throw new Error(error.message)
 

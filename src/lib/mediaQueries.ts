@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { cursorPredicate } from './mediaCursor'
 import { isVideoFileName } from './mediaTypes'
 import type { FileRow, MediaFilters, MediaSort, PageCursor } from '../types/media'
 import { PAGE_SIZE } from '../types/media'
@@ -57,68 +58,38 @@ export async function listMediaPage(opts: {
   filters: MediaFilters
   cursor?: PageCursor | null
   limit?: number
+  signal?: AbortSignal
+  fileIds?: string[]
+  idsOnly?: boolean
 }): Promise<{ rows: FileRow[]; nextCursor: PageCursor | null }> {
   const limit = opts.limit ?? PAGE_SIZE
   const f = opts.filters
   const v11 = await isV11SchemaReady()
 
-  let tagIds: string[] | null = null
-  if (v11 && f.tagIds.length > 0 && f.tagMode === 'and') {
-    tagIds = await fetchTagAndFileIds(f.tagIds)
-    if (tagIds.length === 0) return { rows: [], nextCursor: null }
-  }
-
-  let albumFileIds: string[] | null = null
-  if (f.albumId) {
-    if (v11) {
-      const { data, error } = await supabase
-        .from('album_files')
-        .select('file_id')
-        .eq('user_id', opts.userId)
-        .eq('album_id', f.albumId)
-      if (error) throw new Error(error.message)
-      const { data: legacyAlbum } = await supabase
-        .from('files')
-        .select('id')
-        .eq('user_id', opts.userId)
-        .eq('album_id', f.albumId)
-      albumFileIds = [
-        ...new Set([
-          ...(data ?? []).map((r) => r.file_id),
-          ...((legacyAlbum ?? []) as { id: string }[]).map((r) => r.id),
-        ]),
-      ]
-      if (albumFileIds.length === 0) return { rows: [], nextCursor: null }
-    }
-  }
-
-  let noAlbumIds: string[] | null = null
-  if (v11 && f.noAlbum) {
-    const { data, error } = await supabase.from('album_files').select('file_id').eq('user_id', opts.userId)
-    if (error) throw new Error(error.message)
-    noAlbumIds = (data ?? []).map((r) => r.file_id)
-  }
-
-  let searchIds: string[] | null = null
   const qSearch = sanitizeSearch(f.search)
-  if (v11 && qSearch) {
-    const { data: tagHits } = await supabase
-      .from('tags')
-      .select('id')
-      .eq('user_id', opts.userId)
-      .ilike('name', `%${qSearch}%`)
-    const hitTagIds = (tagHits ?? []).map((t) => t.id)
-    if (hitTagIds.length > 0) {
-      const { data: tagged } = await supabase
-        .from('file_tags')
-        .select('file_id')
-        .eq('user_id', opts.userId)
-        .in('tag_id', hitTagIds)
-      searchIds = [...new Set((tagged ?? []).map((r) => r.file_id))]
-    }
+  const embeds: string[] = []
+  if (v11 && (f.albumId || f.noAlbum)) embeds.push('album_match:album_files()')
+  if (v11 && f.tagIds.length) {
+    if (f.tagMode === 'and') f.tagIds.forEach((_, i) => embeds.push(`tag_${i}:file_tags!inner()`))
+    else embeds.push('tag_any:file_tags!inner()')
   }
-
-  let q = supabase.from('files').select('*').eq('user_id', opts.userId)
+  if (v11 && qSearch) embeds.push('tag_search:file_tags(tags!inner())')
+  const fields = opts.idsOnly ? 'id,created_at,captured_at,width,file_size_bytes,duration_ms,rating,favorite' : '*'
+  let q = supabase.from('files').select([fields, ...embeds].join(',')).eq('user_id', opts.userId)
+  if (v11 && f.albumId) {
+    q = q.eq('album_match.album_id', f.albumId).eq('album_match.user_id', opts.userId)
+      .or(`album_id.eq.${f.albumId},album_match.not.is.null`)
+  }
+  if (v11 && f.noAlbum) q = q.is('album_match', null).is('album_id', null)
+  if (v11 && f.tagIds.length) {
+    if (f.tagMode === 'and') f.tagIds.forEach((tag, i) => { q = q.eq(`tag_${i}.tag_id`, tag).eq(`tag_${i}.user_id`, opts.userId) })
+    else q = q.in('tag_any.tag_id', f.tagIds).eq('tag_any.user_id', opts.userId)
+  }
+  if (v11 && qSearch) q = q.ilike('tag_search.tags.name', `%${qSearch}%`).eq('tag_search.user_id', opts.userId)
+  if (opts.fileIds) {
+    if (!opts.fileIds.length) return { rows: [], nextCursor: null }
+    q = q.in('id', opts.fileIds)
+  }
 
   q = q.or(
     v11
@@ -139,22 +110,6 @@ export async function listMediaPage(opts: {
     q = q.not('mime_type', 'ilike', 'video/%')
   }
 
-  if (tagIds) {
-    q = q.in('id', tagIds.slice(0, 500))
-  } else if (v11 && f.tagIds.length > 0 && f.tagMode === 'or') {
-    const { data, error } = await supabase
-      .from('file_tags')
-      .select('file_id')
-      .eq('user_id', opts.userId)
-      .in('tag_id', f.tagIds)
-    if (error) throw new Error(error.message)
-    const ids = [...new Set((data ?? []).map((r) => r.file_id))]
-    if (ids.length === 0) return { rows: [], nextCursor: null }
-    q = q.in('id', ids.slice(0, 500))
-  }
-
-  if (albumFileIds) q = q.in('id', albumFileIds.slice(0, 500))
-  if (noAlbumIds && noAlbumIds.length > 0) q = q.not('id', 'in', `(${noAlbumIds.slice(0, 500).join(',')})`)
   if (!v11 && f.noAlbum) q = q.is('album_id', null)
 
   if (v11 && f.favorite === 'yes') q = q.eq('favorite', true)
@@ -178,11 +133,7 @@ export async function listMediaPage(opts: {
     if (d) q = q.ilike('source_url', `%${d}%`)
   }
   if (qSearch) {
-    if (searchIds && searchIds.length > 0) {
-      q = q.or(`file_name.ilike.%${qSearch}%,id.in.(${searchIds.slice(0, 200).join(',')})`)
-    } else {
-      q = q.ilike('file_name', `%${qSearch}%`)
-    }
+    q = v11 ? q.or(`file_name.ilike.%${qSearch}%,tag_search.not.is.null`) : q.ilike('file_name', `%${qSearch}%`)
   }
 
   const { col, ascending, extra } = (() => {
@@ -193,25 +144,16 @@ export async function listMediaPage(opts: {
     return requested
   })()
   const cursor = opts.cursor
-  if (cursor) {
-    if (col === 'created_at' || col === 'captured_at') {
-      const op = ascending ? 'gt' : 'lt'
-      if (cursor.ts) q = q.filter(col, op, cursor.ts)
-    } else if (col === 'favorite') {
-      if (cursor.ts) q = q.lt('created_at', cursor.ts)
-    } else if (cursor.num != null) {
-      const op = ascending ? 'gt' : 'lt'
-      q = q.filter(col, op, cursor.num)
-    }
-  }
+  if (cursor) q = q.or(cursorPredicate(col, ascending, cursor, extra))
 
   q = q.order(col, { ascending, nullsFirst: false })
   if (extra) q = q.order(extra, { ascending: false })
   q = q.order('id', { ascending: false }).limit(limit + 1)
 
+  if (opts.signal) q = q.abortSignal(opts.signal)
   const { data, error } = await q
   if (error) throw new Error(error.message)
-  const rows = (data as FileRow[]) ?? []
+  const rows = (data as unknown as FileRow[]) ?? []
   const hasMore = rows.length > limit
   const page = hasMore ? rows.slice(0, limit) : rows
   const last = page[page.length - 1]
@@ -224,6 +166,7 @@ export async function listMediaPage(opts: {
           ? last.favorite ? 1 : 0
           : null
     nextCursor = {
+      value: last[col as keyof FileRow] as string | number | boolean | null ?? null,
       ts: last.created_at,
       id: last.id,
       num,
@@ -241,13 +184,14 @@ export async function listAllMatchingFileIds(opts: {
 }): Promise<string[]> {
   const ids: string[] = []
   let cursor: PageCursor | null = null
-  const max = opts.max ?? 5000
+  const max = opts.max ?? Number.POSITIVE_INFINITY
   while (ids.length < max) {
     const page = await listMediaPage({
       userId: opts.userId,
       filters: opts.filters,
       cursor,
       limit: Math.min(100, max - ids.length),
+      idsOnly: true,
     })
     for (const row of page.rows) ids.push(row.id)
     if (!page.nextCursor || page.rows.length === 0) break

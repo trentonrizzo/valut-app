@@ -76,8 +76,8 @@ export async function exportEditorCollageToVault(opts: {
 }): Promise<ExportResult> {
   const payload = normalizePayload(opts.payload)
   const scene = activeScene(payload)
-  const slots = scene.layers.filter((s) => s.fileId) as EditorLayer[]
-  if (!slots.length) return { ok: false, error: 'Add at least one image before exporting.' }
+  const slots = scene.layers as EditorLayer[]
+  if (!slots.some(s => s.fileId)) return { ok: false, error: 'Add at least one image before exporting.' }
   if (slots.some((s) => s.kind === 'video') || payload.scenes.length > 1) {
     return {
       ok: false,
@@ -111,8 +111,9 @@ export async function exportEditorCollageToVault(opts: {
 
   for (let i = 0; i < slots.length && i < positions.length; i++) {
     const slot = slots[i]!
-    const file = opts.fileById[slot.fileId!]
-    if (!file) continue
+    if (!slot.fileId) continue
+    const file = opts.fileById[slot.fileId]
+    if (!file) return { ok: false, error: 'A referenced source is unavailable. Export was not created; your project is unchanged.' }
     const resolved = await resolveVaultMedia({
       fileId: file.id,
       accessToken: opts.accessToken,

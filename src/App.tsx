@@ -63,6 +63,7 @@ export default function App() {
               <Route path="links" element={<LinksPage />} />
               <Route path="upload" element={<Upload />} />
               <Route path="editor" element={<Editor />} />
+              <Route path="editor/:projectId" element={<Editor />} />
               <Route path="favorites" element={<Favorites />} />
               <Route path="duplicates" element={<Duplicates />} />
               <Route path="deleted" element={<RecentlyDeleted />} />

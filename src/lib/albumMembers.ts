@@ -13,6 +13,16 @@ export type ListAlbumMembersOpts = {
 export type LegacyFileRef = { id: string; album_id: string | null; user_id: string }
 export type MembershipRef = { album_id: string; file_id: string }
 
+export function albumMemberPagePlan(canonicalCount: number, offset: number, limit: number) {
+  const canonicalLimit = Math.max(0, Math.min(limit, canonicalCount - offset))
+  return {
+    canonicalOffset: Math.min(offset, canonicalCount),
+    canonicalLimit,
+    legacyOffset: Math.max(0, offset - canonicalCount),
+    legacyLimit: limit - canonicalLimit,
+  }
+}
+
 export function isAlbumGalleryFile(f: {
   purpose?: string | null
   upload_status?: string | null
@@ -100,82 +110,59 @@ export async function listAlbumMemberFiles(
   const offset = opts.offset ?? 0
   const limit = opts.limit ?? 48
   const v11 = await isV11SchemaReady()
+  if (!v11) return legacyPage(userId, albumId, offset, limit, opts, false)
 
-  const legacy = await listAlbumMemberFilesLegacy(userId, albumId, { ...opts, offset: 0, limit: Math.max(limit, 200) })
+  // Canonical membership order is stable. Legacy-only rows follow it, without
+  // loading/truncating an ID list or repeating the first window on every page.
+  let countQuery = supabase.from('album_files')
+    .select('file_id,files!inner(*)', { count: 'exact', head: true })
+    .eq('user_id', userId).eq('album_id', albumId).eq('files.user_id', userId)
+    .is('files.deleted_at', null)
+    .or('upload_status.eq.ready,upload_status.is.null', { referencedTable: 'files' })
+  if (!opts.includeCoverAssets) countQuery = countQuery.or('purpose.eq.content,purpose.is.null', { referencedTable: 'files' })
+  const countResult = await countQuery
+  if (countResult.error) throw new Error(countResult.error.message)
+  const total = countResult.count ?? 0
+  const plan = albumMemberPagePlan(total, offset, limit)
 
-  if (!v11) {
-    return { rows: legacy.rows.slice(offset, offset + limit), hasMore: legacy.rows.length > offset + limit }
+  const buildCanonical = (withSort: boolean) => {
+    let q = supabase.from('album_files')
+      .select(withSort ? 'file_id,added_at,sort_index,files!inner(*)' : 'file_id,added_at,files!inner(*)')
+      .eq('user_id', userId).eq('album_id', albumId).eq('files.user_id', userId)
+      .is('files.deleted_at', null)
+      .or('upload_status.eq.ready,upload_status.is.null', { referencedTable: 'files' })
+    if (!opts.includeCoverAssets) q = q.or('purpose.eq.content,purpose.is.null', { referencedTable: 'files' })
+    if (withSort) q = q.order('sort_index', { ascending: true })
+    return q.order('added_at', { ascending: false }).order('file_id', { ascending: false })
+      .range(plan.canonicalOffset, plan.canonicalOffset + plan.canonicalLimit - 1)
   }
-
-  const fromCanonical = await listAlbumMemberFilesCanonical(userId, albumId, opts)
-  const merged = mergeAlbumMemberFiles(fromCanonical.rows, legacy.rows).filter((f) => keepMember(f, opts))
-  const page = merged.slice(offset, offset + limit)
-  return { rows: page, hasMore: merged.length > offset + limit || fromCanonical.hasMore }
-}
-
-async function listAlbumMemberFilesCanonical(
-  userId: string,
-  albumId: string,
-  opts: ListAlbumMembersOpts,
-): Promise<{ rows: AlbumMemberFile[]; hasMore: boolean }> {
-  const offset = 0
-  const limit = Math.max(opts.limit ?? 48, 200)
-  const withSort = await supabase
-    .from('album_files')
-    .select('file_id, added_at, sort_index, files(*)')
-    .eq('user_id', userId)
-    .eq('album_id', albumId)
-    .order('sort_index', { ascending: true })
-    .order('added_at', { ascending: false })
-    .range(offset, offset + limit - 1)
-
-  const result = withSort.error
-    ? await supabase
-        .from('album_files')
-        .select('file_id, added_at, files(*)')
-        .eq('user_id', userId)
-        .eq('album_id', albumId)
-        .order('added_at', { ascending: false })
-        .range(offset, offset + limit - 1)
-    : withSort
-
-  if (result.error) return { rows: [], hasMore: false }
-
   const rows: AlbumMemberFile[] = []
-  for (const raw of result.data ?? []) {
-    const file = unwrapJoinedFile((raw as { files?: unknown }).files)
-    if (!file) continue
-    if (!keepMember(file, opts)) continue
-    rows.push(
-      toMember(
-        file,
-        (raw as { added_at?: string }).added_at,
-        Number((raw as { sort_index?: number }).sort_index ?? 0),
-      ),
-    )
+  if (plan.canonicalLimit > 0) {
+    let result = await buildCanonical(true)
+    if (result.error && /sort_index/.test(result.error.message)) result = await buildCanonical(false)
+    if (result.error) throw new Error(result.error.message)
+    for (const raw of result.data ?? []) {
+      const row = raw as unknown as { files: unknown; added_at: string; sort_index?: number }
+      const file = unwrapJoinedFile(row.files)
+      if (file && keepMember(file, opts)) rows.push(toMember(file, row.added_at, row.sort_index))
+    }
   }
-  return { rows, hasMore: (result.data ?? []).length >= limit }
+  if (offset + rows.length < total) return { rows, hasMore: true }
+  const legacy = await legacyPage(userId, albumId, plan.legacyOffset, plan.legacyLimit + 1, opts, true)
+  const merged = [...rows, ...legacy.rows]
+  return { rows: merged.slice(0, limit), hasMore: merged.length > limit || legacy.hasMore }
 }
 
-async function listAlbumMemberFilesLegacy(
-  userId: string,
-  albumId: string,
-  opts: ListAlbumMembersOpts,
-): Promise<{ rows: AlbumMemberFile[]; hasMore: boolean }> {
-  const offset = opts.offset ?? 0
-  const limit = opts.limit ?? 48
-  const { data, error } = await supabase
-    .from('files')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('album_id', albumId)
-    .or('upload_status.eq.ready,upload_status.is.null')
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1)
-  if (error) return { rows: [], hasMore: false }
-  const all = (data as FileRow[]) ?? []
-  const rows = all.filter((f) => keepMember(f, opts))
-  return { rows, hasMore: all.length >= limit }
+async function legacyPage(userId: string, albumId: string, offset: number, limit: number, opts: ListAlbumMembersOpts, excludeCanonical: boolean) {
+  let q = supabase.from('files').select(excludeCanonical ? '*,canonical:album_files()' : '*')
+    .eq('user_id', userId).eq('album_id', albumId)
+    .or('upload_status.eq.ready,upload_status.is.null').is('deleted_at', null)
+  if (!opts.includeCoverAssets) q = q.or('purpose.eq.content,purpose.is.null')
+  if (excludeCanonical) q = q.eq('canonical.album_id', albumId).is('canonical', null)
+  const { data, error } = await q.order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + limit)
+  if (error) throw new Error(error.message)
+  const rows = (data ?? []) as unknown as AlbumMemberFile[]
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit }
 }
 
 export async function listAlbumCoverCandidates(userId: string, albumId: string): Promise<AlbumMemberFile[]> {

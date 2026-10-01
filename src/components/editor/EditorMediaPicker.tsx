@@ -1,229 +1,165 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { FileRow, MediaFilters } from '../../types/media'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type { FileRow, PageCursor } from '../../types/media'
 import { DEFAULT_MEDIA_FILTERS } from '../../types/media'
 import { listMediaPage } from '../../lib/mediaQueries'
 import { listTags } from '../../lib/tags'
-import { fetchAlbumsWithCounts } from '../../lib/albumQueries'
+import { supabase } from '../../lib/supabase'
 import { classifyFileKind } from '../../lib/fileKind'
+import { canRevealLockedContent } from '../../lib/locks'
+import { albumViewAllowed } from '../../lib/albumPin'
 import { VaultPhotoTileMedia } from '../files/VaultPhotoTile'
+import { useDecryptedMediaSrc } from '../../hooks/useDecryptedMediaSrc'
+import { RequestGeneration, toggleRecord } from '../../lib/editor/pickerState'
 
-const MAX_PICK = 4
+type Props = { open: boolean; userId: string; onClose: () => void; onAdd: (files: FileRow[]) => void; maxSelect?: number; projectFileIds?: string[] }
+type Album = { id: string; name: string; parent_album_id?: string | null; is_protected?: boolean }
+type Section = 'all' | 'albums' | 'favorites' | 'photos' | 'videos' | 'recent' | 'project' | 'used'
 
-type Props = {
-  open: boolean
-  userId: string
-  onClose: () => void
-  onAdd: (files: FileRow[]) => void
-  maxSelect?: number
+function Preview({ file, onClose }: { file: FileRow; onClose: () => void }) {
+  const { displayUrl, loading, failed } = useDecryptedMediaSrc(file.file_url, file.is_encrypted, file.user_id, file.file_name, file.id)
+  const [mediaError, setMediaError] = useState(false)
+  return <div className="editor-picker-preview" role="dialog" aria-label="Media preview">
+    <button className="btn btn--outline" onClick={onClose}>Back to selection</button>
+    <strong>{file.file_name}</strong>
+    {loading ? <p role="status">Loading preview…</p> : failed || mediaError || !displayUrl ? <p>Preview unavailable on this device. The original has not been changed.</p> :
+      classifyFileKind({ name: file.file_name, mime_type: file.mime_type }) === 'video'
+        ? <video src={displayUrl} controls playsInline preload="metadata" onError={() => setMediaError(true)} />
+        : <img src={displayUrl} alt={file.file_name} onError={() => setMediaError(true)} />}
+  </div>
 }
 
-type Quick = 'all' | 'photos' | 'videos' | 'favorites'
-
-export function EditorMediaPicker({ open, userId, onClose, onAdd, maxSelect = MAX_PICK }: Props) {
+export function EditorMediaPicker({ open, userId, onClose, onAdd, maxSelect = 4, projectFileIds = [] }: Props) {
   const [rows, setRows] = useState<FileRow[]>([])
-  const [cursor, setCursor] = useState<{ ts: string | null; id: string; num: number | null } | null>(null)
+  const [cursor, setCursor] = useState<PageCursor | null>(null)
   const [loading, setLoading] = useState(false)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selected, setSelected] = useState<Map<string, FileRow>>(new Map())
   const [search, setSearch] = useState('')
-  const [quick, setQuick] = useState<Quick>('all')
+  const [debounced, setDebounced] = useState('')
+  const [section, setSection] = useState<Section>('all')
   const [albumId, setAlbumId] = useState<string | null>(null)
   const [tagId, setTagId] = useState<string | null>(null)
-  const [albums, setAlbums] = useState<{ id: string; name: string }[]>([])
+  const [albums, setAlbums] = useState<Album[]>([])
   const [tags, setTags] = useState<{ id: string; name: string }[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [preview, setPreview] = useState<FileRow | null>(null)
+  const [recentIds, setRecentIds] = useState<string[]>([])
+  const requests = useRef(new RequestGeneration())
+  const closeRef = useRef(onClose); closeRef.current = onClose
+  const closeButton = useRef<HTMLButtonElement>(null)
+  const projectKey = projectFileIds.join(',')
+  const recentKey = recentIds.join(',')
+  const [viewport, setViewport] = useState({ height: window.visualViewport?.height ?? window.innerHeight, top: 0 })
 
-  const filters: MediaFilters = {
-    ...DEFAULT_MEDIA_FILTERS,
-    search,
-    type: quick === 'photos' ? 'photos' : quick === 'videos' ? 'videos' : 'all',
-    favorite: quick === 'favorites' ? 'yes' : 'all',
-    albumId,
-    tagIds: tagId ? [tagId] : [],
-  }
-
-  const load = useCallback(
-    async (reset: boolean) => {
-      setLoading(true)
-      setError(null)
-      try {
-        const page = await listMediaPage({
-          userId,
-          filters,
-          cursor: reset ? null : cursor,
-          limit: 36,
-        })
-        setRows((prev) => (reset ? page.rows : [...prev, ...page.rows]))
-        setCursor(page.nextCursor)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not load media')
-      } finally {
-        setLoading(false)
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when filter keys change
-    [userId, search, quick, albumId, tagId, cursor],
-  )
-
+  useEffect(() => { const timer = setTimeout(() => setDebounced(search), 250); return () => clearTimeout(timer) }, [search])
+  useEffect(() => { if (!open) setPreview(null) }, [open])
+  useEffect(() => { setSelected(new Map()); setRecentIds([]) }, [userId])
   useEffect(() => {
     if (!open) return
-    setSelected(new Set())
-    setSearch('')
-    setQuick('all')
-    setAlbumId(null)
-    setTagId(null)
-    setCursor(null)
-    void listTags(userId).then(setTags).catch(() => {})
-    void fetchAlbumsWithCounts(userId)
-      .then((res) => setAlbums((res.data ?? []).map((x) => ({ id: x.id, name: x.name }))))
-      .catch(() => {})
+    let alive = true
+    void Promise.all([
+      listTags(userId),
+      supabase.from('albums').select('*').eq('user_id', userId).order('order_index'),
+    ]).then(([loadedTags, result]) => {
+      if (!alive) return
+      if (result.error) throw new Error(result.error.message)
+      setTags(loadedTags); setAlbums((result.data ?? []) as Album[])
+    }).catch(e => { if (alive) setError(e instanceof Error ? e.message : 'Could not load filters') })
+    try { setRecentIds(JSON.parse(localStorage.getItem(`vault-editor-recent:${userId}`) || '[]')) } catch { setRecentIds([]) }
+    return () => { alive = false }
   }, [open, userId])
 
   useEffect(() => {
     if (!open) return
-    setCursor(null)
-    void (async () => {
-      setLoading(true)
-      try {
-        const page = await listMediaPage({ userId, filters, cursor: null, limit: 36 })
-        setRows(page.rows)
-        setCursor(page.nextCursor)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not load media')
-      } finally {
-        setLoading(false)
+    const priorFocus = document.activeElement as HTMLElement | null
+    const priorOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    closeButton.current?.focus()
+    const resize = () => setViewport({ height: window.visualViewport?.height ?? window.innerHeight, top: window.visualViewport?.offsetTop ?? 0 })
+    const keyboard = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); if (preview) setPreview(null); else closeRef.current() }
+      if (e.key === 'Tab') {
+        const controls = [...document.querySelectorAll<HTMLElement>('.editor-browser button:not(:disabled), .editor-browser input, .editor-browser select')].filter(el => el.offsetParent !== null)
+        const first = controls[0], last = controls[controls.length - 1]
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() }
       }
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, userId, search, quick, albumId, tagId])
+    }
+    resize(); window.visualViewport?.addEventListener('resize', resize); window.visualViewport?.addEventListener('scroll', resize)
+    window.addEventListener('keydown', keyboard)
+    return () => {
+      document.body.style.overflow = priorOverflow; priorFocus?.focus()
+      window.visualViewport?.removeEventListener('resize', resize); window.visualViewport?.removeEventListener('scroll', resize)
+      window.removeEventListener('keydown', keyboard)
+    }
+  }, [open, preview])
+
+  const filters = {
+    ...DEFAULT_MEDIA_FILTERS, search: debounced, type: section === 'photos' ? 'photos' as const : section === 'videos' ? 'videos' as const : 'all' as const,
+    favorite: section === 'favorites' ? 'yes' as const : 'all' as const,
+    albumId: section === 'albums' ? albumId : null, tagIds: tagId ? [tagId] : [],
+  }
+  async function load(reset: boolean) {
+    const request = requests.current.begin()
+    setLoading(true); setError(null)
+    try {
+      const ids = section === 'project' ? projectFileIds : section === 'used' ? recentIds : undefined
+      const page = ids?.length === 0 ? { rows: [], nextCursor: null } : await listMediaPage({ userId, filters, cursor: reset ? null : cursor, limit: 36, signal: request.signal, fileIds: ids })
+      if (!request.current()) return
+      setRows(prev => reset ? page.rows : [...prev, ...page.rows]); setCursor(page.nextCursor)
+    } catch (e) { if (request.current()) setError(e instanceof Error ? e.message : 'Could not load media') }
+    finally { if (request.current()) setLoading(false) }
+  }
+  useEffect(() => {
+    if (!open) return
+    setRows([]); setCursor(null); void load(true)
+    const generation = requests.current
+    return () => generation.cancel()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query identity, not result cursor, triggers a reset
+  }, [open, userId, debounced, section, albumId, tagId, projectKey, recentKey])
 
   if (!open) return null
-
-  function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else if (next.size < maxSelect) next.add(id)
-      return next
-    })
-  }
-
-  return (
-    <div className="sheet-root">
-      <button type="button" className="sheet-backdrop" aria-label="Close media picker" onClick={onClose} />
-      <div className="sheet sheet--editor-picker" role="dialog" aria-label="Add media">
-        <div className="sheet__handle" />
-        <div className="editor-picker__top">
-          <h2 className="sheet__title">Add media</h2>
-          <button type="button" className="btn btn--ghost" onClick={onClose}>
-            Done
-          </button>
+  const breadcrumb: Album[] = []
+  const seen = new Set<string>()
+  let parent = albums.find(a => a.id === albumId)
+  while (parent && !seen.has(parent.id)) { breadcrumb.unshift(parent); seen.add(parent.id); parent = albums.find(a => a.id === parent?.parent_album_id) }
+  const children = albums.filter(a => (a.parent_album_id ?? null) === albumId)
+  const mediaRows = rows.filter(f => ['image', 'video'].includes(classifyFileKind({ name: f.file_name, mime_type: f.mime_type })))
+  return createPortal(<div className="editor-browser-backdrop">
+    <section className="editor-browser" role="dialog" aria-modal="true" aria-label="Vault media browser" style={{ height: viewport.height, top: viewport.top }}>
+      <header className="editor-browser__header">
+        <div className="editor-picker__top"><h2>Add Vault media</h2><button ref={closeButton} className="btn btn--outline" onClick={onClose}>Close</button></div>
+        <input className="field-input" placeholder="Search filenames and tags" aria-label="Search filenames and tags" value={search} onChange={e => setSearch(e.target.value)} />
+        <div className="editor-browser__filters">
+          <select className="field-input" aria-label="Media source" value={section} onChange={e => setSection(e.target.value as Section)}>
+            {([['all','All Media'],['albums','Albums'],['favorites','Favorites'],['photos','Photos'],['videos','Videos'],['recent','Recently Added'],['project','Project Media'],['used','Recently Used']] as const).map(([id,label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+          <select className="field-input" aria-label="Tag" value={tagId ?? ''} onChange={e => setTagId(e.target.value || null)}><option value="">All tags</option>{tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
         </div>
-        <input
-          className="field-input"
-          placeholder="Search filename, album, tag…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search media"
-        />
-        <div className="filter-quick" role="toolbar" aria-label="Picker filters">
-          {(
-            [
-              ['all', 'All'],
-              ['videos', 'Videos'],
-              ['photos', 'Photos'],
-              ['favorites', 'Favorites'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`filter-quick__chip ${quick === id ? 'is-active' : ''}`}
-              onClick={() => setQuick(id)}
-            >
-              {label}
+        {section === 'albums' ? <nav aria-label="Album breadcrumb"><button className="btn btn--ghost" onClick={() => setAlbumId(null)}>Albums</button>{breadcrumb.map(a => <button className="btn btn--ghost" key={a.id} onClick={() => setAlbumId(a.id)}> / {a.name}</button>)}</nav> : null}
+      </header>
+      <div className="editor-browser__scroll">
+        {section === 'albums' ? <div className="editor-browser__albums">{children.map(a => <button className="btn btn--outline" key={a.id} disabled={!albumViewAllowed(a)} onClick={() => setAlbumId(a.id)}>{a.name}{!albumViewAllowed(a) ? ' · unlock in Albums first' : ''}</button>)}</div> : null}
+        {error ? <p role="alert">{error} <button className="btn" onClick={() => void load(true)}>Retry</button></p> : null}
+        <div className="editor-picker-grid">
+          {mediaRows.map(file => <div key={file.id} className="editor-browser__item">
+            <button className={`editor-picker-tile ${selected.has(file.id) ? 'is-selected' : ''}`} disabled={!canRevealLockedContent(file)} aria-label={`Select ${file.file_name}`} aria-pressed={selected.has(file.id)} onClick={() => setSelected(prev => toggleRecord(prev, file, maxSelect))}>
+              {canRevealLockedContent(file) ? <VaultPhotoTileMedia file={file} userId={userId} /> : <span>Locked</span>}
+              {selected.has(file.id) ? <span className="editor-picker-tile__check">✓</span> : null}
             </button>
-          ))}
+            <button className="editor-browser__preview" disabled={!canRevealLockedContent(file)} onClick={() => setPreview(file)}>Preview <span>{file.file_name}</span></button>
+          </div>)}
         </div>
-        <div className="editor-picker__selects">
-          <label>
-            Albums
-            <select
-              className="field-input"
-              value={albumId ?? ''}
-              onChange={(e) => setAlbumId(e.target.value || null)}
-            >
-              <option value="">All albums</option>
-              {albums.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Tags
-            <select className="field-input" value={tagId ?? ''} onChange={(e) => setTagId(e.target.value || null)}>
-              <option value="">All tags</option>
-              {tags.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {error ? <p className="field-error">{error}</p> : null}
-        <div className="editor-picker-grid editor-picker-grid--large">
-          {rows.map((f) => {
-            const kind = classifyFileKind({ name: f.file_name, mime_type: f.mime_type })
-            if (kind !== 'image' && kind !== 'video') return null
-            const on = selected.has(f.id)
-            return (
-              <button
-                key={f.id}
-                type="button"
-                className={`editor-picker-tile ${on ? 'is-selected' : ''}`}
-                onClick={() => toggle(f.id)}
-                aria-pressed={on}
-              >
-                <VaultPhotoTileMedia file={f} userId={userId} />
-                {kind === 'video' ? <span className="vault-photo-tile__video-glyph" aria-hidden /> : null}
-                {f.favorite ? <span className="vault-photo-tile__fav">★</span> : null}
-                {on ? <span className="editor-picker-tile__check" aria-hidden>
-                  ✓
-                </span> : null}
-              </button>
-            )
-          })}
-        </div>
-        {loading ? <p className="muted">Loading…</p> : null}
-        {cursor ? (
-          <button
-            type="button"
-            className="btn btn--outline"
-            disabled={loading}
-            onClick={() => void load(false)}
-          >
-            Load more
-          </button>
-        ) : null}
-        <div className="editor-picker__footer">
-          <span>
-            {selected.size} selected · max {maxSelect}
-          </span>
-          <button
-            type="button"
-            className="btn btn--primary"
-            disabled={selected.size === 0}
-            onClick={() => {
-              const files = rows.filter((r) => selected.has(r.id))
-              onAdd(files)
-            }}
-          >
-            Add {selected.size || ''}
-          </button>
-        </div>
+        {loading ? <p role="status">Loading…</p> : !mediaRows.length ? <p>No matching photos or videos.</p> : null}
+        {cursor ? <button className="btn btn--outline" disabled={loading} onClick={() => void load(false)}>Load more</button> : null}
       </div>
-    </div>
-  )
+      <footer className="editor-browser__footer"><span>{selected.size} selected · {maxSelect} available</span><button className="btn btn--ghost" onClick={() => setSelected(new Map())}>Clear</button><button className="btn btn--primary" disabled={!selected.size || selected.size > maxSelect} onClick={() => {
+        const files = [...selected.values()]
+        const recent = [...new Set([...files.map(f => f.id), ...recentIds])].slice(0, 200)
+        try { localStorage.setItem(`vault-editor-recent:${userId}`, JSON.stringify(recent)) } catch { /* optional recent history */ }
+        setRecentIds(recent); onAdd(files); setSelected(new Map())
+      }}>Add {selected.size || ''}</button></footer>
+      {preview ? <Preview key={preview.id} file={preview} onClose={() => setPreview(null)} /> : null}
+    </section>
+  </div>, document.body)
 }

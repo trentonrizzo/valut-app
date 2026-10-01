@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { loadProjectWriter, writerFor } from '../lib/editor/session'
+import { storeDraft, type ProjectWriter } from '../lib/editor/persistence'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { useVault } from '../context/useVault'
@@ -14,13 +17,12 @@ import {
   emptyPayload,
   emptyScene,
   exportSupported,
-  inferProjectKind,
   layersForLayout,
   listEditorProjects,
   normalizePayload,
   projectDurationSec,
   projectMediaCount,
-  saveEditorProject,
+  reflowLayersForLayout,
   type EditorLayer,
   type EditorLayout,
   type EditorProject,
@@ -32,84 +34,114 @@ import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
 import { EditorMediaPicker } from '../components/editor/EditorMediaPicker'
 import { EditorTimeline } from '../components/editor/EditorTimeline'
 
-type Mode = 'home' | 'edit'
-
 const SPEEDS = [0.5, 1, 1.5, 2]
 
 export function Editor() {
   const { user, session } = useAuth()
   const { masterKey } = useVault()
   const { showToast } = useToast()
-  const [mode, setMode] = useState<Mode>('home')
+  const navigate = useNavigate()
+  const { projectId: routeId } = useParams<{ projectId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const mode = routeId ? 'edit' : 'home'
+  const pickerOpen = searchParams.get('picker') === '1'
+  function setPickerOpen(open: boolean) {
+    const next = new URLSearchParams(searchParams)
+    if (open) next.set('picker', '1'); else next.delete('picker')
+    setSearchParams(next, { replace: !open })
+  }
+  const writerRef = useRef<ProjectWriter | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadedId, setLoadedId] = useState<string | null>(null)
+  const [, refreshSave] = useState(0)
   const [projects, setProjects] = useState<EditorProject[]>([])
   const [title, setTitle] = useState('Untitled')
   const [payload, setPayload] = useState<EditorProjectPayload>(() => emptyPayload('1'))
-  const [projectId, setProjectId] = useState<string | undefined>()
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerMode, setPickerMode] = useState<'fill-empty' | 'replace'>('fill-empty')
   const [fileById, setFileById] = useState<Record<string, FileRow>>({})
   const [exporting, setExporting] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [seekTime, setSeekTime] = useState(0)
-  const [sourceDuration, setSourceDuration] = useState(0)
+  const [durations, setDurations] = useState<Record<string, number>>({})
+  const [missingIds, setMissingIds] = useState<Set<string>>(new Set())
   const exportCaps = useMemo(() => exportSupported(), [])
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
 
   const scene = activeScene(payload)
   const selectedLayer = scene.layers.find((l) => l.id === selectedLayerId) ?? scene.layers.find((l) => l.fileId) ?? null
 
+  useEffect(() => { setSeekTime(0) }, [selectedLayerId])
+
   useEffect(() => {
     if (!user) return
     void listEditorProjects(user.id)
       .then(setProjects)
       .catch((e) => showToast(e instanceof Error ? e.message : 'Could not load projects', 'error'))
-  }, [user, showToast])
+  }, [user, showToast, routeId])
 
-  // Autosave — create row on first edit if needed (debounced).
   useEffect(() => {
-    if (!user || mode !== 'edit') return
-    const kind = inferProjectKind(payload)
-    const t = window.setTimeout(() => {
-      void saveEditorProject(user.id, { id: projectId, title: title || 'Untitled', kind, payload })
-        .then((saved) => {
-          setProjectId(saved.id)
-          setProjects((prev) => {
-            const i = prev.findIndex((p) => p.id === saved.id)
-            if (i < 0) return [saved, ...prev]
-            const next = prev.slice()
-            next[i] = saved
-            return next
-          })
-        })
-        .catch(() => {})
-    }, 900)
-    return () => window.clearTimeout(t)
-  }, [user, mode, projectId, title, payload])
+    let alive = true
+    let unsubscribe: (() => void) | undefined
+    writerRef.current = null
+    setLoadedId(null); setLoadError(null); setPlaying(false); setSeekTime(0); setDurations({})
+    if (!user || !routeId) return
+    void loadProjectWriter(user.id, routeId).then((writer) => {
+      if (!alive) return
+      const document = writer.draft.document
+      const normalized = normalizePayload(document.payload)
+      writerRef.current = writer
+      setPayload(normalized); setTitle(document.title)
+      setSelectedLayerId(activeScene(normalized).layers[0]?.id ?? null)
+      setLoadedId(routeId)
+      unsubscribe = writer.subscribe(() => { if (alive) refreshSave(n => n + 1) })
+      if (writer.draft.dirty) void writer.flush()
+    }).catch((error) => { if (alive) setLoadError(error instanceof Error ? error.message : 'Could not open project') })
+    return () => {
+      alive = false; unsubscribe?.()
+      // Do not cancel the writer: immediate navigation must finish its serialized save.
+      void writerRef.current?.flush()
+    }
+  }, [user, routeId])
+
+  useEffect(() => {
+    const flush = () => { void writerRef.current?.flush() }
+    window.addEventListener('online', flush)
+    window.addEventListener('pagehide', flush)
+    return () => { window.removeEventListener('online', flush); window.removeEventListener('pagehide', flush) }
+  }, [])
 
   useEffect(() => {
     if (!user) return
     const ids = payload.scenes
       .flatMap((s) => s.layers.map((l) => l.fileId))
-      .filter((id): id is string => Boolean(id && !fileById[id]))
+      .filter((id): id is string => Boolean(id && !fileById[id] && !missingIds.has(id)))
     if (!ids.length) return
+    let alive = true
     void supabase
       .from('files')
       .select('*')
       .eq('user_id', user.id)
       .in('id', ids)
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (!alive) return
+        if (error) { showToast('Could not load project media. References are preserved; reopen to retry.', 'error'); return }
         if (!data) return
+        const found = new Set(data.map(r => r.id))
+        setMissingIds(prev => new Set([...prev, ...ids.filter(id => !found.has(id))]))
         setFileById((prev) => {
           const next = { ...prev }
           for (const row of data as FileRow[]) next[row.id] = row
           return next
         })
       })
-  }, [payload, user, fileById])
+    return () => { alive = false }
+  }, [payload, user, fileById, missingIds, showToast])
 
   function updatePayload(mutator: (p: EditorProjectPayload) => EditorProjectPayload) {
-    setPayload((prev) => normalizePayload(mutator(prev)))
+    const next = normalizePayload(mutator(payload))
+    setPayload(next)
+    if (routeId) writerRef.current?.edit({ id: routeId, title, payload: next })
   }
 
   function updateScene(mutator: (s: EditorScene) => EditorScene) {
@@ -127,30 +159,33 @@ export function Editor() {
   }
 
   function setLayout(layout: EditorLayout) {
-    updateScene((s) => ({ ...s, layout, layers: layersForLayout(layout, s.layers) }))
+    const reflowed = reflowLayersForLayout(layout, scene.layers, payload.audioMasterLayerId ? [payload.audioMasterLayerId] : [])
+    if (!reflowed) {
+      showToast('This layout cannot hold every populated or edited cell. Remove a cell explicitly or use a larger layout; nothing was changed.', 'error')
+      return
+    }
+    updateScene((s) => ({ ...s, layout, layers: reflowed }))
   }
 
   function openNewProject() {
-    const p = emptyPayload('1')
-    setPayload(p)
-    setTitle('Untitled')
-    setProjectId(undefined)
-    setSelectedLayerId(p.scenes[0]?.layers[0]?.id ?? null)
-    setMode('edit')
-    setPickerOpen(true)
-    setPickerMode('fill-empty')
+    if (!user) return
+    const id = crypto.randomUUID()
+    const draft = { document: { id, title: 'Untitled', payload: emptyPayload('1') }, baseUpdatedAt: null, dirty: false }
+    try {
+      storeDraft(user.id, draft)
+      writerFor(user.id, draft)
+      setPickerMode('fill-empty')
+      navigate(`/editor/${id}?picker=1`)
+    } catch {
+      showToast('Browser draft storage is unavailable. No project was created.', 'error')
+    }
   }
 
-  function openProject(p: EditorProject) {
-    const normalized = normalizePayload(p.payload)
-    setPayload(normalized)
-    setTitle(p.title)
-    setProjectId(p.id)
-    setSelectedLayerId(activeScene(normalized).layers.find((l) => l.fileId)?.id ?? activeScene(normalized).layers[0]?.id ?? null)
-    setMode('edit')
-  }
+  function openProject(p: EditorProject) { navigate(`/editor/${p.id}`) }
 
   function addFilesToScene(files: FileRow[]) {
+    const capacity = pickerMode === 'replace' ? 1 : 4 - scene.layers.filter(l => l.fileId).length
+    if (files.length > capacity || capacity === 0) { showToast('This scene is full. Add a scene or replace a selected cell; no media was discarded.', 'error'); return }
     setFileById((prev) => {
       const next = { ...prev }
       for (const f of files) next[f.id] = f
@@ -229,7 +264,7 @@ export function Editor() {
         showToast(result.error, 'error')
         return
       }
-      showToast(`Exported “${result.fileName}” as new Vault media`)
+      showToast(`Queued “${result.fileName}”. Upload and storage verification must finish before it is ready in Library.`)
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Export failed', 'error')
     } finally {
@@ -269,14 +304,16 @@ export function Editor() {
           ) : (
             <ul className="editor-project-list">
               {projects.map((p) => {
-                const media = projectMediaCount(p.payload)
-                const dur = projectDurationSec(p.payload)
+                let normalized: EditorProjectPayload | null = null
+                try { normalized = normalizePayload(p.payload) } catch { /* preserve unsupported document */ }
+                const media = normalized ? projectMediaCount(normalized) : 0
+                const dur = normalized ? projectDurationSec(normalized) : 0
                 return (
                   <li key={p.id} className="editor-project-card">
                     <button type="button" className="editor-project-card__main" onClick={() => openProject(p)}>
                       <strong>{p.title || 'Untitled'}</strong>
                       <span className="muted">
-                        {media} media · {p.payload.scenes.length} scene{p.payload.scenes.length === 1 ? '' : 's'}
+                        {media} media · {normalized ? `${normalized.scenes.length} scenes` : 'Unsupported format — preserved'}
                         {dur > 0 ? ` · ~${Math.round(dur)}s` : ''} · {new Date(p.updated_at).toLocaleString()}
                       </span>
                     </button>
@@ -319,24 +356,31 @@ export function Editor() {
     )
   }
 
+  if (loadError || loadedId !== routeId) return <main className="dashboard__main"><button className="btn" onClick={() => navigate('/editor')}>Projects</button><p role="status">{loadError || 'Opening project…'}</p></main>
+
   return (
     <div className="dashboard editor-page editor-page--workspace">
       <main className="dashboard__main editor-workspace">
         <div className="editor-workspace__bar">
-          <button type="button" className="btn btn--ghost" onClick={() => setMode('home')}>
+          <button type="button" className="btn btn--ghost" onClick={() => { void writerRef.current?.flush(); navigate('/editor') }}>
             Projects
           </button>
           <input
             className="field-input editor-workspace__title"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => { setTitle(e.target.value); writerRef.current?.edit({ id: routeId!, title: e.target.value, payload }) }}
             aria-label="Project name"
           />
           <button type="button" className="btn btn--outline" disabled={exporting || !exportCaps.canvas} onClick={() => void exportNew()}>
-            {exporting ? '…' : 'Export'}
+            {exporting ? 'Rendering / queueing…' : 'Export'}
           </button>
         </div>
 
+        <div className="editor-save-status" role="status">
+          <span>{writerRef.current?.status ?? 'Saved'}</span>
+          {writerRef.current?.error ? <span>{writerRef.current.error}</span> : null}
+          {writerRef.current?.draft.dirty ? <button className="btn btn--ghost" onClick={() => void writerRef.current?.flush()}>Retry save</button> : null}
+        </div>
         <div className={`editor-canvas editor-canvas--${scene.layout === '1+2' ? 'plus' : scene.layout}`}>
           {scene.layers.map((layer) => (
             <button
@@ -354,6 +398,7 @@ export function Editor() {
               {layer.fileId ? (
                 <EditorLayerPreview
                   file={fileById[layer.fileId]}
+                  missing={missingIds.has(layer.fileId)}
                   layer={layer}
                   playing={playing}
                   audioMaster={payload.audioMasterLayerId === layer.id}
@@ -361,7 +406,7 @@ export function Editor() {
                     videoRefs.current[layer.id] = el
                   }}
                   onDuration={(d) => {
-                    if (layer.id === selectedLayer?.id) setSourceDuration(d)
+                    setDurations(prev => prev[layer.id] === d ? prev : { ...prev, [layer.id]: d })
                   }}
                   onTime={(t) => {
                     if (layer.id === selectedLayer?.id) setSeekTime(t)
@@ -523,7 +568,7 @@ export function Editor() {
               <>
                 <EditorTimeline
                   layer={selectedLayer}
-                  duration={sourceDuration || Math.max(selectedLayer.trimEnd ?? 0, selectedLayer.trimStart + 1)}
+                  duration={durations[selectedLayer.id] || Math.max(selectedLayer.trimEnd ?? 0, selectedLayer.trimStart + 1)}
                   currentTime={seekTime}
                   onChange={(patch) => updateLayer(selectedLayer.id, patch)}
                   onSeek={(t) => {
@@ -552,7 +597,7 @@ export function Editor() {
                   <button
                     type="button"
                     className="btn btn--outline"
-                    onClick={() => updateLayer(selectedLayer.id, { muted: !selectedLayer.muted })}
+                    onClick={() => updatePayload(p => ({ ...p, audioMasterLayerId: selectedLayer.id, scenes: p.scenes.map(sc => ({ ...sc, layers: sc.layers.map(l => l.id === selectedLayer.id ? { ...l, muted: !l.muted } : l) })) }))}
                   >
                     {selectedLayer.muted ? 'Unmute' : 'Mute'}
                   </button>
@@ -616,7 +661,8 @@ export function Editor() {
           userId={user.id}
           onClose={() => setPickerOpen(false)}
           onAdd={addFilesToScene}
-          maxSelect={pickerMode === 'replace' ? 1 : 4}
+          projectFileIds={payload.scenes.flatMap(s => s.layers.flatMap(l => l.fileId ? [l.fileId] : []))}
+          maxSelect={pickerMode === 'replace' ? 1 : Math.max(0, 4 - scene.layers.filter(l => l.fileId).length)}
         />
       ) : null}
     </div>
@@ -625,6 +671,7 @@ export function Editor() {
 
 function EditorLayerPreview({
   file,
+  missing,
   layer,
   audioMaster,
   videoRef,
@@ -632,6 +679,7 @@ function EditorLayerPreview({
   onTime,
 }: {
   file?: FileRow
+  missing: boolean
   layer: EditorLayer
   playing: boolean
   audioMaster: boolean
@@ -653,9 +701,10 @@ function EditorLayerPreview({
     transformOrigin: 'center center',
   }
 
+  if (missing) return <span>Source unavailable. Its project reference and edits are preserved.</span>
   if (loading || (!displayUrl && !failed)) return <div className="editor-slot__skeleton" aria-hidden />
-  if (failed || !displayUrl) return <span>Preview unavailable</span>
-  if (kind === 'video' || file?.mime_type?.startsWith('video/')) {
+  if (failed || !displayUrl) return <span>Preview unavailable on this device. The original and project reference are unchanged.</span>
+  if (layer.kind === 'video' || kind === 'video' || file?.mime_type?.startsWith('video/')) {
     return (
       <video
         ref={videoRef}

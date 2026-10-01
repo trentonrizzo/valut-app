@@ -74,6 +74,7 @@ export const DEFAULT_MEDIA_FILTERS: MediaFilters = {
 }
 
 export type PageCursor = {
+  value?: string | number | boolean | null
   ts: string | null
   id: string
   num: number | null

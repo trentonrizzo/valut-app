@@ -21,6 +21,7 @@ export function SelectionProvider({ children }: { children: ReactNode }) {
   return <SelectionContext.Provider value={value}>{children}</SelectionContext.Provider>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- existing shared context hook; no runtime change
 export function useMediaSelection() {
   const ctx = useContext(SelectionContext)
   if (!ctx) {

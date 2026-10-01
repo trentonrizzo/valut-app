@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { RequestGeneration } from '../lib/editor/pickerState'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
@@ -107,22 +108,26 @@ export function Library() {
 
   useEffect(() => subscribeUploads(() => setQueueTick((n) => n + 1)), [])
 
+  const requests = useRef(new RequestGeneration())
   const load = useCallback(
     async (reset: boolean) => {
       if (!user) return
+      const request = requests.current.begin()
       setLoading(true)
       try {
         const page = await listMediaPage({
           userId: user.id,
           filters,
           cursor: reset ? null : cursor,
+          signal: request.signal,
         })
+        if (!request.current()) return
         setRows((prev) => (reset ? page.rows : [...prev, ...page.rows]))
         setCursor(page.nextCursor)
       } catch (e) {
-        showToast(e instanceof Error ? e.message : 'Could not load library', 'error')
+        if (request.current()) showToast(e instanceof Error ? e.message : 'Could not load library', 'error')
       } finally {
-        setLoading(false)
+        if (request.current()) setLoading(false)
       }
     },
     [user, filters, cursor, showToast],
@@ -132,6 +137,8 @@ export function Library() {
     setCursor(null)
     setRows([])
     void load(true)
+    const generation = requests.current
+    return () => generation.cancel()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when filters change
   }, [filters, user?.id])
 

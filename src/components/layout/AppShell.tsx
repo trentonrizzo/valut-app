@@ -3,7 +3,8 @@ import { BottomNav } from './BottomNav'
 import { VaultAiAgent } from '../VaultAiAgent'
 
 export function AppShell() {
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
+  const pickerOpen = pathname.startsWith('/editor/') && new URLSearchParams(search).get('picker') === '1'
   const hideBottomNav =
     /^\/albums\/[^/]+(\/media\/[^/]+)?$/.test(pathname) || /^\/library\/media\/[^/]+$/.test(pathname)
 
@@ -13,7 +14,7 @@ export function AppShell() {
         <Outlet />
       </div>
       {!hideBottomNav ? <BottomNav /> : null}
-      <VaultAiAgent />
+      {!pickerOpen ? <VaultAiAgent /> : null}
     </div>
   )
 }

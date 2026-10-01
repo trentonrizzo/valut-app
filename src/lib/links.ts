@@ -1,7 +1,6 @@
 /**
  * First-class saved links / URLs (vault_links). Soft-fails if migration not applied.
  */
-// @ts-nocheck — vault_links lands before generated Database types refresh.
 import { supabase } from './supabase'
 
 export type VaultLink = {

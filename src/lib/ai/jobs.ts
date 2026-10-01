@@ -2,7 +2,6 @@
  * Durable AI / organization jobs — persisted in Supabase, processed in resumable chunks.
  * Survives drawer close / navigation. Not a browser-only timer fake.
  */
-// @ts-nocheck — additive ai_jobs / related tables land before generated Database types refresh.
 import { supabase } from '../supabase'
 import { createTag, addTagsToFiles } from '../tags'
 import { addFilesToAlbum } from '../albumMembership'
@@ -200,7 +199,7 @@ export async function processJobChunk(userId: string, jobId: string, accessToken
   // For larger vaults, store file ids in cursor progressively from album_files / files query.
   const { data: fileRows } = await supabase
     .from('files')
-    .select('id, file_name, mime_type, file_url, thumb_url, poster_url, content_hash, purpose, deleted_at')
+    .select('id, file_name, mime_type, file_url, thumbnail_key, poster_key, content_hash, purpose, deleted_at')
     .eq('user_id', userId)
     .is('deleted_at', null)
     .eq('purpose', 'content')

@@ -152,7 +152,7 @@ export async function runVaultTool(
       }
       case 'assign_tag': {
         const fileIds = asStringArray(call.args.fileIds)
-        let tagIds = asStringArray(call.args.tagIds)
+        const tagIds = asStringArray(call.args.tagIds)
         const tagNames = asStringArray(call.args.tagNames)
         if (!tagIds.length && tagNames.length) {
           const all = await listTags(userId)
@@ -429,7 +429,7 @@ export async function runVaultTool(
         let cached = 0
         let visionErrors = 0
         const matchedIds: string[] = []
-        let linkedPeople = 0
+
         let needsConfig = false
         for (const file of files.slice(0, maxAnalyze)) {
           const result = await analyzeMediaVisual({
@@ -448,7 +448,7 @@ export async function runVaultTool(
           if (result.analysis && analysisMatchesFocus(result.analysis, focus)) matchedIds.push(file.id)
           const slots = (result.analysis?.attributes as { person_slots?: unknown[] } | undefined)?.person_slots
           if (result.analysis && Array.isArray(slots) && slots.length) {
-            linkedPeople += await applyPersonSlotsFromAnalysis(
+            await applyPersonSlotsFromAnalysis(
               userId,
               file.id,
               slots as { label: string; notes?: string }[],

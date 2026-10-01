@@ -28,6 +28,7 @@ export type EditorScene = {
 /** v2 payload — scenes with up to 4 layers each. Legacy v1 slots still accepted. */
 export type EditorProjectPayload = {
   version?: 1 | 2
+  [key: string]: unknown
   scenes: EditorScene[]
   activeSceneId: string
   /** Layer id that may play audio (others muted by default). */
@@ -95,7 +96,29 @@ export function emptyLayer(): EditorLayer {
 
 export function layersForLayout(layout: EditorLayout, keep: EditorLayer[] = []): EditorLayer[] {
   const count = LAYOUTS.find((l) => l.id === layout)?.count ?? 1
-  return Array.from({ length: count }, (_, i) => keep[i] ?? emptyLayer())
+  // Never discard layers, including empty layers with future instructions.
+  return Array.from({ length: Math.max(count, keep.length) }, (_, i) => keep[i] ?? emptyLayer())
+}
+
+const EDITOR_LAYER_KEYS = new Set([
+  'id', 'fileId', 'kind', 'trimStart', 'trimEnd', 'photoDuration', 'speed', 'muted', 'volume',
+  'objectFit', 'zoom', 'panX', 'panY',
+])
+
+function isDisposableEmptyLayer(layer: EditorLayer, protectedIds: Set<string>): boolean {
+  if (protectedIds.has(layer.id) || Object.keys(layer).some((key) => !EDITOR_LAYER_KEYS.has(key))) return false
+  return layer.fileId == null && layer.kind === 'empty' && layer.trimStart === 0 && layer.trimEnd == null &&
+    layer.photoDuration === 3 && layer.speed === 1 && layer.muted && layer.volume === 1 &&
+    layer.objectFit === 'cover' && layer.zoom === 1 && layer.panX === 0 && layer.panY === 0
+}
+
+/** Safely compacts only untouched empty cells; returns null rather than dropping instructions. */
+export function reflowLayersForLayout(layout: EditorLayout, layers: EditorLayer[], protectedLayerIds: string[] = []): EditorLayer[] | null {
+  const count = LAYOUTS.find((item) => item.id === layout)?.count ?? 1
+  const protectedIds = new Set(protectedLayerIds)
+  const meaningful = layers.filter((layer) => !isDisposableEmptyLayer(layer, protectedIds))
+  if (meaningful.length > count) return null
+  return Array.from({ length: count }, (_, index) => meaningful[index] ?? emptyLayer())
 }
 
 export function emptyScene(layout: EditorLayout = '1'): EditorScene {
@@ -115,8 +138,10 @@ export function emptyPayload(layout: EditorLayout = '1'): EditorProjectPayload {
 export function normalizePayload(raw: EditorProjectPayload | Record<string, unknown> | null | undefined): EditorProjectPayload {
   if (!raw || typeof raw !== 'object') return emptyPayload()
   const p = raw as EditorProjectPayload
+  if (p.version != null && p.version !== 1 && p.version !== 2) throw new Error('This project uses a newer format. Its document has not been changed.')
   if (Array.isArray(p.scenes) && p.scenes.length > 0) {
     const scenes = p.scenes.map((s) => ({
+      ...s,
       id: s.id || uid(),
       layout: s.layout || '1',
       layers: (s.layers?.length ? s.layers : layersForLayout(s.layout || '1')).map((layer) => ({
@@ -132,6 +157,7 @@ export function normalizePayload(raw: EditorProjectPayload | Record<string, unkn
       })),
     }))
     return {
+      ...p,
       version: 2,
       scenes,
       activeSceneId: scenes.some((s) => s.id === p.activeSceneId) ? p.activeSceneId : scenes[0]!.id,
@@ -142,11 +168,12 @@ export function normalizePayload(raw: EditorProjectPayload | Record<string, unkn
   // Migrate v1 slots → single scene
   const layout = (p.layout || '1') as EditorLayout
   const slots = Array.isArray(p.slots) ? p.slots : []
-  const layers = layersForLayout(layout).map((layer, i) => {
+  const layers = Array.from({ length: Math.max(LAYOUTS.find(l => l.id === layout)?.count ?? 1, slots.length) }, () => emptyLayer()).map((layer, i) => {
     const s = slots[i]
     if (!s) return layer
     return {
       ...layer,
+      ...s,
       fileId: s.fileId,
       kind: s.kind,
       trimStart: s.trimStart ?? 0,
@@ -158,6 +185,7 @@ export function normalizePayload(raw: EditorProjectPayload | Record<string, unkn
   const scene: EditorScene = { id: uid(), layout, layers }
   const master = typeof p.audioMasterIndex === 'number' ? layers[p.audioMasterIndex]?.id ?? null : null
   return {
+    ...p,
     version: 2,
     scenes: [scene],
     activeSceneId: scene.id,
@@ -195,10 +223,8 @@ export async function listEditorProjects(userId: string): Promise<EditorProject[
     .eq('user_id', userId)
     .order('updated_at', { ascending: false })
   if (error) throw new Error(error.message)
-  return ((data as EditorProject[]) ?? []).map((p) => ({
-    ...p,
-    payload: normalizePayload(p.payload),
-  }))
+  // Read raw documents. Opening/listing is never a migration or write.
+  return (data as EditorProject[]) ?? []
 }
 
 export async function saveEditorProject(
@@ -260,4 +286,38 @@ export function inferProjectKind(payload: EditorProjectPayload): 'collage' | 'vi
   if (layers.length === 1 && layers[0]?.kind === 'video') return 'video'
   if (layers.some((l) => l.kind === 'video')) return 'video'
   return 'collage'
+}
+
+
+export async function getEditorProject(userId: string, id: string): Promise<EditorProject | null> {
+  const { data, error } = await supabase.from('editor_projects').select('*').eq('user_id', userId).eq('id', id).maybeSingle()
+  if (error) throw new Error(error.message)
+  return data as EditorProject | null
+}
+
+/** Compare-and-swap using the existing updated_at column; no schema migration. */
+export async function saveProjectDocument(userId: string, document: import('./persistence').ProjectDocument, expected: string | null) {
+  const row = {
+    id: document.id, user_id: userId, title: document.title || 'Untitled',
+    kind: inferProjectKind(document.payload), payload: document.payload as unknown as Record<string, unknown>,
+    updated_at: new Date(Math.max(Date.now(), expected ? Date.parse(expected) + 1 : 0)).toISOString(),
+  }
+  const result = expected
+    ? await supabase.from('editor_projects').update(row).eq('id', document.id).eq('user_id', userId).eq('updated_at', expected).select().maybeSingle()
+    : await supabase.from('editor_projects').upsert(row, { onConflict: 'id', ignoreDuplicates: true }).select().maybeSingle()
+  if (result.error) throw new Error(result.error.message)
+  if (result.data) return { updatedAt: result.data.updated_at }
+  // Response-loss retry: accept the exact document already committed, never overwrite a different revision.
+  const current = await getEditorProject(userId, document.id)
+  if (current && current.title === row.title && stableDocumentJson(current.payload) === stableDocumentJson(document.payload)) {
+    return { updatedAt: current.updated_at }
+  }
+  throw new Error('This project changed in another tab/device. Your draft is preserved; reopen the project before retrying. No newer revision was overwritten.')
+}
+
+
+export function stableDocumentJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableDocumentJson).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableDocumentJson((value as Record<string, unknown>)[key])}`).join(',')}}`
+  return JSON.stringify(value)
 }

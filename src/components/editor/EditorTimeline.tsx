@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EditorLayer } from '../../lib/editor/projects'
 
 type Props = {
@@ -31,13 +31,13 @@ export function EditorTimeline({ layer, duration, onChange, onSeek, currentTime 
     return `${(t / safeDur) * 100}%`
   }
 
-  function timeFromClientX(clientX: number) {
+  const timeFromClientX = useCallback((clientX: number) => {
     const el = trackRef.current
     if (!el) return 0
     const rect = el.getBoundingClientRect()
     const x = Math.min(Math.max(0, clientX - rect.left), rect.width)
     return (x / rect.width) * safeDur
-  }
+  }, [safeDur])
 
   useEffect(() => {
     if (!dragging) return
@@ -63,7 +63,7 @@ export function EditorTimeline({ layer, duration, onChange, onSeek, currentTime 
       window.removeEventListener('pointerup', onPointerUp)
       window.removeEventListener('pointercancel', onPointerUp)
     }
-  }, [dragging, end, start, onChange, onSeek])
+  }, [dragging, end, start, onChange, onSeek, timeFromClientX])
 
   return (
     <div className="editor-timeline">
