@@ -1,6 +1,7 @@
 import { formatBytes } from '../formatBytes'
 import { displayProgress, formatEta, formatSpeedBps, type UploadStage } from './strategy'
 import type { UploadQueueItem } from '../../components/UploadQueueOverlay'
+import { normalizeUploadMode, uploadModeLabel, type UploadMode } from './uploadMode'
 
 type LiveLike = {
   id: string
@@ -12,6 +13,7 @@ type LiveLike = {
   error: string | null
   speedBps: number
   etaSeconds: number | null
+  uploadMode?: UploadMode
 }
 
 function overlayStatus(state: UploadStage): UploadQueueItem['status'] {
@@ -56,6 +58,7 @@ export function liveToQueueItem(j: LiveLike): UploadQueueItem {
     canResume: j.state === 'paused',
     canRetry: j.state === 'failed' || j.state === 'needs-file',
     bytesText: `${formatBytes(Math.min(j.uploadedBytes, j.size))} / ${formatBytes(j.size)}`,
+    modeLabel: uploadModeLabel(normalizeUploadMode(j.uploadMode)),
   }
 }
 

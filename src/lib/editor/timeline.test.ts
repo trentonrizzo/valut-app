@@ -4,11 +4,14 @@ import {
   addClips,
   clipDuration,
   commitHistory,
+  createComposition,
+  createCompositionItem,
   createClip,
   deleteClip,
   duplicateClip,
   emptyTimeline,
   newHistory,
+  normalizeTimeline,
   primaryClips,
   redoHistory,
   reorderClip,
@@ -17,6 +20,9 @@ import {
   timelineDuration,
   undoHistory,
   updateClip,
+  updateCompositionItem,
+  replaceCompositionItem,
+  timelineFileIds,
 } from './timeline'
 
 function video(fileId = 'video-1', duration = 10) {
@@ -120,5 +126,81 @@ describe('timeline commands', () => {
     expect(primaryClips(history.present)).toHaveLength(0)
     history = redoHistory(history)
     expect(primaryClips(history.present)).toHaveLength(1)
+  })
+})
+
+describe('timeline compositions', () => {
+  it('stores mixed media as one non-destructive composition clip', () => {
+    const items = [
+      createCompositionItem({ fileId: 'photo-a', mediaType: 'image' }),
+      createCompositionItem({ fileId: 'video-b', mediaType: 'video', sourceDuration: 12 }),
+    ]
+    const clip = createComposition(items, 'horizontal')
+    const timeline = addClips(emptyTimeline(), [clip])
+    expect(primaryClips(timeline)[0]?.mediaType).toBe('composition')
+    expect(timelineFileIds(timeline)).toEqual(['photo-a', 'video-b'])
+    expect(clipDuration(primaryClips(timeline)[0]!)).toBe(12)
+    expect(primaryClips(timeline)[0]?.composition?.items[0]?.transform.width).toBe(.5)
+  })
+
+  it.each([
+    ['horizontal', 2, .5, 1],
+    ['vertical', 2, 1, .5],
+    ['three', 3, .6, 1],
+    ['grid', 4, .5, .5],
+  ] as const)('applies the %s preset to %i cells', (layout, count, width, height) => {
+    const items = Array.from({ length: count }, (_, index) => createCompositionItem({ fileId: `f-${index}`, mediaType: index % 2 ? 'video' : 'image', sourceDuration: 6 }))
+    const composition = createComposition(items, layout).composition!
+    expect(composition.items).toHaveLength(count)
+    expect(composition.items[0]?.transform).toMatchObject({ width, height })
+  })
+
+  it('edits one cell without changing immutable source references and supports undo', () => {
+    const clip = createComposition([
+      createCompositionItem({ fileId: 'a', mediaType: 'image' }),
+      createCompositionItem({ fileId: 'b', mediaType: 'video', sourceDuration: 5 }),
+    ])
+    const initial = addClips(emptyTimeline(), [clip])
+    const itemId = clip.composition!.items[1]!.itemId
+    const edited = updateCompositionItem(initial, clip.clipId, itemId, { muted: false, volume: .4 })
+    expect(primaryClips(edited)[0]?.composition?.items[1]).toMatchObject({ fileId: 'b', muted: false, volume: .4 })
+    const history = undoHistory(commitHistory(newHistory(initial), edited))
+    expect(primaryClips(history.present)[0]?.composition?.items[1]?.muted).toBe(true)
+  })
+
+  it('replaces media while retaining the cell geometry', () => {
+    const original = createCompositionItem({ fileId: 'old', mediaType: 'image' })
+    const clip = createComposition([original, createCompositionItem({ fileId: 'other', mediaType: 'image' })], 'horizontal')
+    const initial = addClips(emptyTimeline(), [clip])
+    const replacement = createCompositionItem({ fileId: 'new', mediaType: 'video', sourceDuration: 8 })
+    const changed = replaceCompositionItem(initial, clip.clipId, original.itemId, replacement)
+    const item = primaryClips(changed)[0]?.composition?.items[0]
+    expect(item).toMatchObject({ fileId: 'new', mediaType: 'video' })
+    expect(item?.transform.width).toBe(.5)
+  })
+
+  it('duplicates and deletes only composition instructions', () => {
+    const storageDelete = vi.fn()
+    const clip = createComposition([createCompositionItem({ fileId: 'r2-source', mediaType: 'video', sourceDuration: 4 })])
+    const initial = addClips(emptyTimeline(), [clip])
+    const duplicated = duplicateClip(initial, clip.clipId).timeline
+    expect(primaryClips(duplicated)).toHaveLength(2)
+    expect(timelineFileIds(duplicated)).toEqual(['r2-source'])
+    expect(primaryClips(deleteClip(duplicated, clip.clipId))).toHaveLength(1)
+    expect(storageDelete).not.toHaveBeenCalled()
+  })
+
+  it('normalizes saved composition documents without discarding items', () => {
+    const clip = createComposition([createCompositionItem({ fileId: 'a', mediaType: 'image' }), createCompositionItem({ fileId: 'b', mediaType: 'video', sourceDuration: 7 })], 'vertical')
+    const saved = JSON.parse(JSON.stringify(addClips(emptyTimeline(), [clip])))
+    const loaded = primaryClips(normalizeTimeline(saved))[0]
+    expect(loaded?.composition?.items.map((item) => item.fileId)).toEqual(['a', 'b'])
+    expect(loaded?.composition?.layout).toBe('vertical')
+  })
+
+  it('does not split a composition into corrupt partial instructions', () => {
+    const clip = createComposition([createCompositionItem({ fileId: 'a', mediaType: 'image' })])
+    const timeline = addClips(emptyTimeline(), [clip])
+    expect(splitClip(timeline, clip.clipId, 1).rightClipId).toBeNull()
   })
 })

@@ -327,7 +327,8 @@ describe('18MB multipart MOV regression', () => {
     expect(fileConcurrency()).toBeGreaterThanOrEqual(1)
     expect(fileConcurrency()).toBeLessThanOrEqual(4)
     const src = readFileSync(join(root, 'lib/upload/manager.ts'), 'utf8')
-    expect(src).toContain('fileConcurrency() - active.length')
+    expect(src).toContain("fileConcurrency('fast') - active.length")
+    expect(src).toContain("firstQueuedMode === 'low-bandwidth'")
   })
 
   it('M: one failed item does not block remaining 99', () => {

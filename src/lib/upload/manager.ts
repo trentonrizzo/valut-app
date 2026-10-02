@@ -24,7 +24,8 @@ import {
   apiVerifyObject,
 } from './storageApi'
 import { deleteJob, listJobs, saveJob, type PersistedUploadJob, type UploadUiState } from './queueStore'
-import { fileConcurrency, isIosDevice, partConcurrency, putWithRetry } from './multipartConfig'
+import { fileConcurrency, isIosDevice, partConcurrency, partGapMs, putWithRetry, sleep } from './multipartConfig'
+import { getPreferredUploadMode, normalizeUploadMode, setPreferredUploadMode, type UploadMode } from './uploadMode'
 import { extractMediaMetadata, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
 import { sha256HexOfFileBestEffort } from './contentHash'
 import {
@@ -65,6 +66,15 @@ let masterKey: CryptoKey | null = null
 let accessToken = ''
 let userId = ''
 let pumping = false
+let preferredUploadMode: UploadMode = getPreferredUploadMode()
+let recoveryListenersInstalled = false
+
+export function getUploadMode(): UploadMode { return preferredUploadMode }
+export function setUploadMode(mode: UploadMode): void {
+  preferredUploadMode = normalizeUploadMode(mode)
+  setPreferredUploadMode(preferredUploadMode)
+  emit()
+}
 
 function emit() {
   for (const l of listeners) l()
@@ -83,6 +93,13 @@ export function configureUploader(opts: { accessToken: string; userId: string; m
   accessToken = opts.accessToken
   userId = opts.userId
   masterKey = opts.masterKey
+  if (!recoveryListenersInstalled && typeof window !== 'undefined') {
+    const resumeEligibleWork = () => { if (document.visibilityState === 'visible' && navigator.onLine) void pump() }
+    window.addEventListener('online', resumeEligibleWork)
+    window.addEventListener('pageshow', resumeEligibleWork)
+    document.addEventListener('visibilitychange', resumeEligibleWork)
+    recoveryListenersInstalled = true
+  }
 }
 
 export async function hydrateUploadQueue(): Promise<void> {
@@ -157,7 +174,7 @@ function noteProgress(job: PersistedUploadJob, uploadedBytes: number, now = Date
   emit()
 }
 
-export async function enqueueFiles(files: File[], opts: { albumId: string | null; purpose?: 'content' | 'cover' }): Promise<string[]> {
+export async function enqueueFiles(files: File[], opts: { albumId: string | null; purpose?: 'content' | 'cover'; mode?: UploadMode }): Promise<string[]> {
   if (!userId || !accessToken) throw new Error('Not signed in')
   const purpose = opts.purpose ?? 'content'
   const ids: string[] = []
@@ -242,6 +259,7 @@ export async function enqueueFiles(files: File[], opts: { albumId: string | null
       errorCode: null,
       lastStage: 'queued',
       lastModified: file.lastModified,
+      uploadMode: normalizeUploadMode(opts.mode ?? preferredUploadMode),
     }
     filesInMemory.set(id, file)
     await persist(job)
@@ -378,9 +396,15 @@ async function pump() {
       const active = [...live.values()].filter((j) =>
         ['preparing', 'encrypting', 'uploading', 'finalizing'].includes(j.state),
       )
-      const slots = Math.max(0, fileConcurrency() - active.length)
+      const activeLowBandwidth = active.some((job) => normalizeUploadMode(job.uploadMode) === 'low-bandwidth')
+      const firstQueuedMode = normalizeUploadMode(queued[0]?.uploadMode)
+      const slots = activeLowBandwidth || (firstQueuedMode === 'low-bandwidth' && active.length > 0)
+        ? 0
+        : firstQueuedMode === 'low-bandwidth'
+          ? 1
+          : Math.max(0, fileConcurrency('fast') - active.length)
       if (slots === 0 || queued.length === 0) break
-      const batch = queued.slice(0, slots)
+      const batch = firstQueuedMode === 'low-bandwidth' ? queued.slice(0, 1) : queued.filter((job) => normalizeUploadMode(job.uploadMode) === 'fast').slice(0, slots)
       await Promise.all(batch.map((j) => runJob(j.id)))
     }
   } finally {
@@ -508,7 +532,7 @@ async function runJob(id: string) {
               job.uploadedBytes = loaded
               noteProgress({ ...job, uploadedBytes: loaded }, loaded)
             },
-            { requireEtag: false, signal: ac.signal },
+            { requireEtag: false, signal: ac.signal, backoffMultiplier: normalizeUploadMode(job.uploadMode) === 'low-bandwidth' ? 2 : 1 },
           )
           job.parts = [{ partNumber: 1, etag: 'put', bytes: file.size, done: true, acked: true }]
           job.uploadedBytes = file.size
@@ -820,7 +844,8 @@ async function uploadParts(
 ) {
   const id = initial.id
   const pending = () => (live.get(id)?.parts ?? []).filter((p) => !p.done && !p.acked).map((p) => p.partNumber)
-  const limit = partConcurrency()
+  const mode = normalizeUploadMode(initial.uploadMode)
+  const limit = partConcurrency(mode)
   const chunkSize = initial.chunkSize || CHUNK_PLAINTEXT_BYTES
 
   async function runPart(partNumber: number) {
@@ -844,6 +869,7 @@ async function uploadParts(
       requireEtag: false,
       signal,
       refreshUrl: sign,
+      backoffMultiplier: mode === 'low-bandwidth' ? 2 : 1,
     })
     const latest = live.get(id)!
     const parts = latest.parts.map((part) =>
@@ -855,6 +881,8 @@ async function uploadParts(
     const next = { ...latest, parts, uploadedBytes, state: 'uploading' as UploadUiState }
     noteProgress(next, uploadedBytes)
     await persist(next)
+    const gap = partGapMs(mode)
+    if (gap && pending().length) await sleep(gap)
   }
 
   const queue = pending()

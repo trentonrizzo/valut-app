@@ -26,6 +26,7 @@ export type UploadQueueItem = {
   canResume?: boolean
   canRetry?: boolean
   bytesText?: string | null
+  modeLabel?: string | null
 }
 
 type Props = {
@@ -209,6 +210,7 @@ export function UploadQueueOverlay({
                 ) : item.speedText || item.stateLabel ? (
                   <p className="vault-upload-queue__hint">
                     {item.stateLabel}
+                    {item.modeLabel ? ` · ${item.modeLabel}` : ''}
                     {item.speedText ? ` · ${item.speedText}` : ''}
                     {item.etaText ? ` · ${item.etaText}` : ''}
                   </p>

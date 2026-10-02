@@ -226,7 +226,7 @@ export function activeScene(payload: EditorProjectPayload): EditorScene {
 }
 
 export function projectMediaCount(payload: EditorProjectPayload): number {
-  if (payload.version === 3 && payload.timeline) return primaryClips(payload.timeline).length
+  if (payload.version === 3 && payload.timeline) return primaryClips(payload.timeline).reduce((count, clip) => count + (clip.mediaType === 'composition' ? clip.composition?.items.length ?? 0 : 1), 0)
   return payload.scenes.reduce((n, s) => n + s.layers.filter((l) => l.fileId).length, 0)
 }
 

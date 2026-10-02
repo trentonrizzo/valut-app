@@ -1,3 +1,5 @@
+import type { UploadMode } from './uploadMode'
+
 export {
   MAX_PARTS,
   MULTIPART_THRESHOLD_BYTES,
@@ -11,12 +13,18 @@ export function isIosDevice(): boolean {
   return /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 }
 
-export function partConcurrency(): number {
+export function partConcurrency(mode: UploadMode = 'fast'): number {
+  if (mode === 'low-bandwidth') return 1
   return isIosDevice() ? 2 : 4
 }
 
-export function fileConcurrency(): number {
+export function fileConcurrency(mode: UploadMode = 'fast'): number {
+  if (mode === 'low-bandwidth') return 1
   return isIosDevice() ? 1 : 2
+}
+
+export function partGapMs(mode: UploadMode = 'fast'): number {
+  return mode === 'low-bandwidth' ? 1_200 : 0
 }
 
 export function sleep(ms: number): Promise<void> {
@@ -39,6 +47,7 @@ export type PutRetryOpts = {
   requireEtag?: boolean
   signal?: AbortSignal
   refreshUrl?: () => Promise<string>
+  backoffMultiplier?: number
 }
 
 function optsOf(signalOrOpts?: AbortSignal | PutRetryOpts): PutRetryOpts {
@@ -75,7 +84,7 @@ export async function putWithRetry(
         }
       }
       if (attempt === MAX_PART_RETRIES) break
-      await sleep(backoffMs(attempt))
+      await sleep(backoffMs(attempt) * Math.max(1, opts.backoffMultiplier ?? 1))
     }
   }
   throw lastErr ?? new Error('Part upload failed')

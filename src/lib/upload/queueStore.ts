@@ -54,6 +54,8 @@ export type PersistedUploadJob = {
   errorCode?: string | null
   lastStage?: string | null
   lastModified?: number
+  /** Added without rewriting old jobs. Missing means the original fast behavior. */
+  uploadMode?: import('./uploadMode').UploadMode
 }
 
 const DB = 'vault-upload-queue-v11'
