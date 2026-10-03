@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
@@ -9,16 +9,19 @@ import {
   listLinks,
   softDeleteLinks,
   updateLink,
+  displayLinkName,
   type VaultLink,
 } from '../lib/links'
 import { copyLinkToClipboard, parseLinksIncrementally, safeOpenLink, type ParsedLink } from '../lib/linkParser'
 import { fetchAlbumsWithCounts } from '../lib/albumQueries'
 import { createTag, listTags } from '../lib/tags'
+import { enrichLinksMetadata, listLinksNeedingMetadata } from '../lib/linkMetadata'
+import { LinkDetailsSheet } from '../components/links/LinkDetailsSheet'
 
 const REVIEW_PAGE = 50
 
 export function LinksPage() {
-  const { user } = useAuth()
+  const { user, session } = useAuth()
   const { showToast } = useToast()
   const [params] = useSearchParams()
   const [links, setLinks] = useState<VaultLink[]>([])
@@ -40,6 +43,9 @@ export function LinksPage() {
   const [filterTagIds, setFilterTagIds] = useState<string[]>([])
   const [filterAlbumId, setFilterAlbumId] = useState('')
   const [importDuplicates, setImportDuplicates] = useState(false)
+  const [detailsLink, setDetailsLink] = useState<VaultLink | null>(null)
+  const [enriching, setEnriching] = useState(false)
+  const autoEnrichStarted = useRef(false)
 
   const refresh = useCallback(async () => {
     if (!user) return
@@ -58,6 +64,14 @@ export function LinksPage() {
     })
     void listTags(user.id).then((rows) => setTags(rows.map((tag) => ({ id: tag.id, name: tag.name })))).catch(() => {})
   }, [user])
+  useEffect(() => {
+    if (!user || !session?.access_token || autoEnrichStarted.current) return
+    autoEnrichStarted.current = true
+    void listLinksNeedingMetadata(user.id, 100)
+      .then((rows) => rows.length ? enrichLinksMetadata(user.id, session.access_token, rows, 2) : null)
+      .then(() => refresh())
+      .catch(() => {})
+  }, [user, session?.access_token, refresh])
 
   const visibleReview = useMemo(() => review.slice(0, reviewVisible), [review, reviewVisible])
 
@@ -94,6 +108,11 @@ export function LinksPage() {
       setNewTags('')
       showToast(`${result.created.length} link(s) added${result.skippedExisting ? `, ${result.skippedExisting} existing skipped` : ''}${result.failed.length ? `, ${result.failed.length} failed` : ''}`, result.failed.length ? 'error' : 'success')
       await refresh()
+      if (session?.access_token && result.created.length) {
+        void enrichLinksMetadata(user.id, session.access_token, result.created, 2)
+          .then(() => refresh())
+          .catch(() => {})
+      }
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Import failed', 'error')
     } finally {
@@ -169,6 +188,15 @@ export function LinksPage() {
         <select className="vault-sort-select" value={filterAlbumId} onChange={(event) => setFilterAlbumId(event.target.value)}><option value="">Any album</option>{albums.map((album) => <option key={album.id} value={album.id}>{album.name}</option>)}</select>
         <select className="vault-sort-select" value="" onChange={(event) => { const id = event.target.value; if (id && !filterTagIds.includes(id)) setFilterTagIds([...filterTagIds, id]) }}><option value="">Filter by tag…</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select>
         {filterTagIds.length ? <select className="vault-sort-select" value={tagMode} onChange={(event) => setTagMode(event.target.value as 'and' | 'or')}><option value="and">Match all tags</option><option value="or">Match any tag</option></select> : null}
+        <button type="button" className="btn btn--ghost btn--sm" disabled={enriching || !session?.access_token} onClick={() => {
+          if (!session?.access_token) return
+          setEnriching(true)
+          void listLinksNeedingMetadata(user.id, 500)
+            .then((rows) => enrichLinksMetadata(user.id, session.access_token, rows, 2, (done, total) => setProgress(Math.round(done / Math.max(1, total) * 100))))
+            .then((result) => { showToast(`${result.resolved} names resolved, ${result.unavailable} unavailable, ${result.failed} failed`); return refresh() })
+            .catch((error) => showToast(error instanceof Error ? error.message : 'Link enrichment failed', 'error'))
+            .finally(() => { setEnriching(false); setProgress(null) })
+        }}>{enriching ? `Enriching… ${progress ?? 0}%` : 'Enrich names'}</button>
       </section>
 
       {selected.size ? (
@@ -187,10 +215,11 @@ export function LinksPage() {
             <label className="links-list__select"><input type="checkbox" checked={selected.has(link.id)} onChange={() => { const next = new Set(selected); if (next.has(link.id)) next.delete(link.id); else next.add(link.id); setSelected(next) }} /></label>
             <button type="button" className="links-list__open" onClick={() => { if (!safeOpenLink(link.url)) showToast('Only safe http/https links can be opened.', 'error') }}>
               <span className="links-list__icon" aria-hidden>↗</span>
-              <span><strong>{link.title || link.domain || 'Link'}</strong><small>{link.domain || 'Unknown domain'}</small></span>
+              <span><strong>{displayLinkName(link)}</strong><small>{link.provider || link.domain || 'Unknown provider'}</small></span>
             </button>
             <button type="button" className="btn btn--ghost" aria-label={link.favorite ? 'Unfavorite' : 'Favorite'} onClick={() => void updateLink(user.id, link.id, { favorite: !link.favorite }).then(refresh)}>{link.favorite ? '★' : '☆'}</button>
             <button type="button" className="btn btn--ghost" onClick={() => void copyLinkToClipboard(link.url).then((ok) => showToast(ok ? 'Link copied' : 'Copy failed', ok ? 'success' : 'error'))}>Copy</button>
+            <button type="button" className="btn btn--ghost" onClick={() => setDetailsLink(link)}>Details</button>
             <button type="button" className="btn btn--ghost" title={link.url} onClick={() => {
               const title = window.prompt('Link name', link.title || '')
               if (title == null) return
@@ -204,6 +233,7 @@ export function LinksPage() {
         ))}
       </ul>
       {!links.length ? <p className="muted">No matching links.</p> : null}
+      <LinkDetailsSheet userId={user.id} link={detailsLink} onClose={() => setDetailsLink(null)} />
     </div>
   )
 }

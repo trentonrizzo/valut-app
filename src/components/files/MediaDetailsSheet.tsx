@@ -18,7 +18,7 @@ function fmtDate(iso: string | null | undefined): string {
   if (!iso) return 'Unknown'
   const d = new Date(iso)
   if (!Number.isFinite(d.getTime())) return 'Unknown'
-  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
 }
 
 function fmtCaptured(file: FileRow): string {

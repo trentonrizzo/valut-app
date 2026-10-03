@@ -94,4 +94,28 @@ describe('data-safety source contracts', () => {
     expect(src).not.toContain('R2_')
     expect(src).not.toMatch(/fetch\s*\(/)
   })
+
+  it('provider metadata migration is additive and never rewrites URLs or existing titles', () => {
+    const src = readFileSync(join(root, 'supabase/migrations/20261003110000_link_provider_metadata.sql'), 'utf8')
+    const uncommented = src.replace(/--.*$/gm, '').toLowerCase()
+    expect(uncommented).not.toMatch(/drop\s/)
+    expect(uncommented).not.toMatch(/\btruncate\b/)
+    expect(uncommented).not.toMatch(/delete\s+from/)
+    expect(uncommented).not.toMatch(/update\s+public\.vault_links/)
+    expect(src).toContain('automatic_title')
+    expect(src).toContain('provider_created_at')
+  })
+
+  it('always renders Created separately from Uploaded and keeps Created visible when unknown', () => {
+    const src = readFileSync(join(root, 'src/components/files/MediaDetailsSheet.tsx'), 'utf8')
+    expect(src).toContain("{ label: 'Created', value: fmtCaptured(file) }")
+    expect(src).toContain("{ label: 'Uploaded', value: fmtDate(file.created_at) }")
+    expect(src).toContain("return 'Unknown'")
+  })
+
+  it('keeps bounded capture extraction active in legacy upload mode', () => {
+    const src = readFileSync(join(root, 'src/lib/upload/manager.ts'), 'utf8')
+    expect(src).toContain('extractCaptureDateMetadata(file)')
+    expect(src).toContain("logUploadSelection('metadata-bounded-legacy'")
+  })
 })

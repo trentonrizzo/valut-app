@@ -1,5 +1,6 @@
 /** Bounded MP4/MOV capture-date extraction; originals are never modified. */
 import type { CaptureDateResult } from './exifCaptureDate'
+import { readBlobSlice } from './boundedBlobRead'
 
 const MAC_EPOCH_OFFSET_SEC = 2082844800 // 1904-01-01 → 1970-01-01
 
@@ -64,7 +65,7 @@ function scanAtoms(
     const contentStart = offset + header
     const contentEnd = offset + size
 
-    if (type === 'moov' || type === 'trak' || type === 'mdia' || type === 'minf' || type === 'stbl' || type === 'udta' || type === 'meta') {
+    if (type === 'moov' || type === 'trak' || type === 'mdia' || type === 'minf' || type === 'stbl' || type === 'udta' || type === 'meta' || type === 'ilst' || type === '©day') {
       // meta often has 4-byte version/flags before children
       const childStart = type === 'meta' ? contentStart + 4 : contentStart
       scanAtoms(view, childStart, contentEnd, depth + 1, out)
@@ -108,6 +109,62 @@ function scanAtoms(
   }
 }
 
+function scanEmbeddedQuickTimeDate(buf: ArrayBuffer): CaptureDateResult | null {
+  const bytes = new Uint8Array(buf)
+  const markers = ['com.apple.quicktime.creationdate', 'creationdate', '©day']
+  let foundMarker = false
+  for (const marker of markers) {
+    const needle = Array.from(marker, (char) => char.charCodeAt(0) & 0xff)
+    for (let i = 0; i <= bytes.length - needle.length; i += 1) {
+      let same = true
+      for (let j = 0; j < needle.length; j += 1) if (bytes[i + j] !== needle[j]) { same = false; break }
+      if (!same) continue
+      foundMarker = true
+      let snippet = ''
+      const end = Math.min(bytes.length, i + marker.length + 192)
+      for (let j = i + marker.length; j < end; j += 1) snippet += bytes[j]! >= 32 && bytes[j]! < 127 ? String.fromCharCode(bytes[j]!) : ' '
+      const parsed = parseAsciiDate(snippet.trim())
+      if (parsed) return parsed
+    }
+  }
+  // mdta stores the key name and its value in separate atoms. Once the
+  // authoritative creation-date key is present, scan this bounded metadata
+  // segment for its ISO value without treating unrelated timestamps as capture.
+  if (foundMarker) {
+    for (let i = 0; i + 19 < bytes.length; i += 1) {
+      if (bytes[i] < 0x31 || bytes[i] > 0x32 || bytes[i + 4] !== 0x2d || bytes[i + 7] !== 0x2d) continue
+      let snippet = ''
+      for (let j = i; j < Math.min(bytes.length, i + 40); j += 1) {
+        const b = bytes[j]!
+        snippet += b >= 32 && b < 127 ? String.fromCharCode(b) : ' '
+      }
+      const parsed = parseAsciiDate(snippet.trim())
+      if (parsed) return parsed
+    }
+  }
+  return null
+}
+
+function parseResynchronizedAtoms(buf: ArrayBuffer): CaptureDateResult | null {
+  const embedded = scanEmbeddedQuickTimeDate(buf)
+  if (embedded) return embedded
+  const direct = extractMp4MovCaptureDateDetailsFromBuffer(buf)
+  if (direct) return direct
+  const bytes = new Uint8Array(buf)
+  const view = new DataView(buf)
+  for (let i = 4; i + 12 <= bytes.length; i += 1) {
+    if (bytes[i] !== 0x6d || bytes[i + 1] !== 0x6f || bytes[i + 2] !== 0x6f || bytes[i + 3] !== 0x76) continue
+    const start = i - 4
+    const size = view.getUint32(start, false)
+    if (size >= 8 && start + size <= bytes.length) {
+      const slice = buf.slice(start, start + size)
+      const parsed = extractMp4MovCaptureDateDetailsFromBuffer(slice)
+      if (parsed) return parsed
+    }
+  }
+  return null
+}
+
 /** Parse capture date from an ArrayBuffer of an MP4/MOV file (or large prefix). */
 export function extractMp4MovCaptureDateDetailsFromBuffer(buf: ArrayBuffer): CaptureDateResult | null {
   try {
@@ -126,19 +183,32 @@ export async function extractVideoCaptureDateDetails(file: Blob): Promise<Captur
   try {
     // moov may be at end (iPhone); read head + tail when large
     const headSize = Math.min(file.size, 4 * 1024 * 1024)
-    const head = await file.slice(0, headSize).arrayBuffer()
-    let found = extractMp4MovCaptureDateDetailsFromBuffer(head)
-    if (found) return found
+    const head = await readBlobSlice(file, 0, headSize)
+    const headResult = parseResynchronizedAtoms(head)
+    if (headResult?.source === 'quicktime_day') return headResult
     if (file.size > headSize) {
-      const tailSize = Math.min(file.size, 3 * 1024 * 1024)
-      const tail = await file.slice(file.size - tailSize).arrayBuffer()
-      found = extractMp4MovCaptureDateDetailsFromBuffer(tail)
-      if (found) return found
+      const tailSize = Math.min(file.size, 16 * 1024 * 1024)
+      const tail = await readBlobSlice(file, file.size - tailSize, file.size)
+      const tailResult = parseResynchronizedAtoms(tail)
+      // Authoritative camera/date metadata can live at the end of an edited
+      // iPhone MOV. It outranks the generic container creation timestamp.
+      if (tailResult?.source === 'quicktime_day') return tailResult
+      return headResult || tailResult
     }
-    return null
+    return headResult
   } catch {
     return null
   }
+}
+
+export function extractVideoCaptureDateFromSegments(segments: ArrayBuffer[]): CaptureDateResult | null {
+  let containerFallback: CaptureDateResult | null = null
+  for (const segment of segments) {
+    const found = parseResynchronizedAtoms(segment)
+    if (found?.source === 'quicktime_day') return found
+    containerFallback ||= found
+  }
+  return containerFallback
 }
 
 /** Backwards-compatible exact timestamp accessor. */

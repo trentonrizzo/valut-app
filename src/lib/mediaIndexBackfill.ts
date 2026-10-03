@@ -5,10 +5,12 @@
 import { supabase } from './supabase'
 import { apiSignedGet } from './upload/storageApi'
 import { sha256HexOfFile } from './upload/contentHash'
-import { extractJpegCaptureDateDetails } from './upload/exifCaptureDate'
-import { extractVideoCaptureDateDetails } from './upload/videoCaptureDate'
+import { extractImageCaptureDateFromBuffer } from './upload/exifCaptureDate'
+import { extractVideoCaptureDateFromSegments } from './upload/videoCaptureDate'
 import { resolveVaultMedia } from './media/resolveMedia'
 import type { FileRow } from '../types/media'
+import { decryptChunk, importDek, CHUNK_PLAINTEXT_BYTES, GCM_TAG_BYTES } from './crypto/chunkCipher'
+import { base64ToBytes, unwrapDek } from './crypto/envelope'
 
 export type HashBatchResult = {
   scanned: number
@@ -25,6 +27,8 @@ export type CaptureBatchResult = {
   scanned: number
   updated: number
   skipped: number
+  unknown: number
+  technicalSkipped: number
   failed: number
   done: boolean
   nextCursorCreatedAt: string | null
@@ -32,38 +36,83 @@ export type CaptureBatchResult = {
   messages: string[]
 }
 
-const MAX_ENCRYPTED_CAPTURE_SCAN_BYTES = 64 * 1024 * 1024
-const JPEG_SCAN_BYTES = 256 * 1024
+const IMAGE_SCAN_BYTES = 4 * 1024 * 1024
 const VIDEO_HEAD_BYTES = 4 * 1024 * 1024
-const VIDEO_TAIL_BYTES = 3 * 1024 * 1024
+const VIDEO_TAIL_BYTES = 16 * 1024 * 1024
 
-async function fetchBoundedRange(url: string, start: number, end: number): Promise<Blob> {
+async function fetchBoundedRange(url: string, start: number, end: number): Promise<ArrayBuffer> {
   const response = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } })
   if (!response.ok) throw new Error(`range fetch ${response.status}`)
   const declared = Number(response.headers.get('content-length') || 0)
   const expected = Math.max(0, end - start + 1)
   if (declared > expected + 1024) throw new Error('storage ignored bounded range request')
-  const blob = await response.blob()
-  if (blob.size > expected + 1024) throw new Error('storage returned an unbounded range')
-  return blob
+  const buffer = await response.arrayBuffer()
+  if (buffer.byteLength > expected + 1024) throw new Error('storage returned an unbounded range')
+  return buffer
 }
 
-async function captureScanBlob(
+class CaptureTechnicalSkip extends Error {}
+
+export function captureMetadataChunkIndexes(plainSize: number, chunkSize: number, isImage: boolean): number[] {
+  const count = Math.max(1, Math.ceil(Math.max(0, plainSize) / Math.max(1, chunkSize)))
+  return [...new Set(isImage ? [0] : [0, Math.max(0, count - 2), count - 1])]
+}
+
+async function captureScanSegments(
   accessToken: string,
   file: FileRow,
   masterKey: CryptoKey | null,
   isImage: boolean,
-): Promise<Blob> {
-  if (file.is_encrypted) return blobFromResolved(accessToken, file, masterKey)
+): Promise<ArrayBuffer[]> {
+  if (file.is_encrypted) {
+    if (!masterKey) throw new CaptureTechnicalSkip('unlock recovery key to scan encrypted metadata')
+    if ((file.encryption_version ?? 0) !== 1 || !file.wrapped_dek) {
+      throw new CaptureTechnicalSkip('legacy whole-file encryption cannot be range-decrypted safely')
+    }
+    const signed = await apiSignedGet(accessToken, file.id, 'original')
+    const nonceRaw = signed.metadata?.fileNonce
+    if (typeof nonceRaw !== 'string') throw new CaptureTechnicalSkip('missing chunk nonce metadata')
+    const chunkSize = signed.chunkSize || file.encryption_chunk_size || CHUNK_PLAINTEXT_BYTES
+    const plainSize = Math.max(0, file.file_size_bytes ?? 0)
+    if (!plainSize) throw new CaptureTechnicalSkip('missing plaintext size')
+    const wanted = captureMetadataChunkIndexes(plainSize, chunkSize, isImage)
+    const rawDek = await unwrapDek(masterKey, file.wrapped_dek)
+    const dek = await importDek(rawDek)
+    const nonce = base64ToBytes(nonceRaw)
+    const decrypted = new Map<number, ArrayBuffer>()
+    for (const index of [...new Set(wanted)]) {
+      const plainBytes = Math.min(chunkSize, Math.max(0, plainSize - index * chunkSize))
+      if (!plainBytes) continue
+      const cipherStart = index * (chunkSize + GCM_TAG_BYTES)
+      const cipherEnd = cipherStart + plainBytes + GCM_TAG_BYTES - 1
+      const cipher = await fetchBoundedRange(signed.url, cipherStart, cipherEnd)
+      decrypted.set(index, await decryptChunk(dek, nonce, index, cipher))
+    }
+    const first = decrypted.get(0)
+    if (isImage) return first ? [first] : []
+    const tailIndexes = [...decrypted.keys()].filter((index) => index !== 0).sort((a, b) => a - b)
+    const tailParts = tailIndexes.map((index) => new Uint8Array(decrypted.get(index)!))
+    const tailBytes = tailParts.reduce((total, part) => total + part.byteLength, 0)
+    const tail = tailBytes ? new Uint8Array(tailBytes) : null
+    let offset = 0
+    for (const part of tailParts) {
+      tail!.set(part, offset)
+      offset += part.byteLength
+    }
+    return [first, tail?.buffer ?? null].filter((segment): segment is ArrayBuffer => segment != null)
+  }
   const signed = await apiSignedGet(accessToken, file.id, 'original')
   const total = Math.max(0, file.file_size_bytes ?? 0)
-  if (isImage) return fetchBoundedRange(signed.url, 0, Math.max(0, Math.min(total || JPEG_SCAN_BYTES, JPEG_SCAN_BYTES) - 1))
+  if (isImage) {
+    const head = await fetchBoundedRange(signed.url, 0, Math.max(0, Math.min(total || IMAGE_SCAN_BYTES, IMAGE_SCAN_BYTES) - 1))
+    return [head]
+  }
   const headEnd = Math.max(0, Math.min(total || VIDEO_HEAD_BYTES, VIDEO_HEAD_BYTES) - 1)
   const head = await fetchBoundedRange(signed.url, 0, headEnd)
-  if (total <= VIDEO_HEAD_BYTES) return head
+  if (total <= VIDEO_HEAD_BYTES) return [head]
   const tailStart = Math.max(VIDEO_HEAD_BYTES, total - VIDEO_TAIL_BYTES)
   const tail = await fetchBoundedRange(signed.url, tailStart, total - 1)
-  return new Blob([head, tail], { type: file.mime_type || 'application/octet-stream' })
+  return [head, tail]
 }
 
 const MAX_HASH_BYTES = 180 * 1024 * 1024
@@ -210,7 +259,7 @@ export async function backfillCaptureDatesBatch(opts: {
   const limit = opts.limit ?? 3
   let q = supabase
     .from('files')
-    .select('id, file_url, is_encrypted, mime_type, file_name, file_size_bytes, captured_at, captured_at_source, created_at')
+    .select('id, file_url, is_encrypted, mime_type, file_name, file_size_bytes, captured_at, captured_at_source, created_at, encryption_version, wrapped_dek, encryption_chunk_size, metadata_json')
     .eq('user_id', opts.userId)
     .eq('purpose', 'content')
     .is('deleted_at', null)
@@ -229,6 +278,8 @@ export async function backfillCaptureDatesBatch(opts: {
   const rows = (data ?? []) as (FileRow & { created_at: string })[]
   let updated = 0
   let skipped = 0
+  let unknown = 0
+  let technicalSkipped = 0
   let failed = 0
   const messages: string[] = []
   for (const row of rows) {
@@ -239,20 +290,16 @@ export async function backfillCaptureDatesBatch(opts: {
       const isVideo = mime.startsWith('video/') || /\.(mp4|mov|m4v)$/.test(name)
       if (!isImage && !isVideo) {
         skipped += 1
+        technicalSkipped += 1
         continue
       }
-      // Encrypted legacy resolution currently decrypts a whole object. Keep that path
-      // explicitly bounded; large encrypted originals remain untouched/unknown.
-      if (row.is_encrypted && (row.file_size_bytes ?? 0) > MAX_ENCRYPTED_CAPTURE_SCAN_BYTES) {
-        skipped += 1
-        continue
-      }
-      const blob = await captureScanBlob(opts.accessToken, row, opts.masterKey, isImage)
+      const segments = await captureScanSegments(opts.accessToken, row, opts.masterKey, isImage)
       const capture = isImage
-        ? await extractJpegCaptureDateDetails(blob)
-        : await extractVideoCaptureDateDetails(blob)
+        ? extractImageCaptureDateFromBuffer(segments[0] ?? new ArrayBuffer(0))
+        : extractVideoCaptureDateFromSegments(segments)
       if (!capture) {
         skipped += 1
+        unknown += 1
         continue
       }
       const { error: upErr } = await supabase
@@ -270,8 +317,14 @@ export async function backfillCaptureDatesBatch(opts: {
       if (upErr) throw new Error(upErr.message)
       updated += 1
     } catch (e) {
-      failed += 1
-      messages.push(`${row.file_name}: ${e instanceof Error ? e.message : 'capture backfill failed'}`)
+      if (e instanceof CaptureTechnicalSkip) {
+        skipped += 1
+        technicalSkipped += 1
+        messages.push(`${row.file_name}: ${e.message}`)
+      } else {
+        failed += 1
+        messages.push(`${row.file_name}: ${e instanceof Error ? e.message : 'capture backfill failed'}`)
+      }
     }
   }
   const last = rows[rows.length - 1]
@@ -279,6 +332,8 @@ export async function backfillCaptureDatesBatch(opts: {
     scanned: rows.length,
     updated,
     skipped,
+    unknown,
+    technicalSkipped,
     failed,
     done: rows.length < limit,
     nextCursorCreatedAt: last?.created_at ?? null,

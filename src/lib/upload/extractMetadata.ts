@@ -50,22 +50,51 @@ export async function extractMediaMetadata(file: File): Promise<ExtractedMeta> {
   }
   try {
     if (isImageUpload(file)) {
-      const dim = await withTimeout(imageSize(file), META_TIMEOUT_MS, { width: null, height: null })
-      const capture = await withTimeout(extractJpegCaptureDateDetails(file), META_TIMEOUT_MS, null)
-      return capture ? { ...base, ...dim, capturedAt: capture.capturedAt, capturedAtLocal: capture.capturedLocal, capturedAtOffset: capture.capturedOffset, capturedAtSource: capture.source } : { ...base, ...dim, ...fileModifiedFallback(file) }
+      const [dim, capture] = await Promise.all([
+        withTimeout(imageSize(file), META_TIMEOUT_MS, { width: null, height: null }),
+        extractCaptureDateMetadata(file),
+      ])
+      return { ...base, ...dim, ...capture }
     }
     if (isVideoUpload(file)) {
-      const v = await withTimeout(videoMeta(file), META_TIMEOUT_MS, {
-        width: null,
-        height: null,
-        durationMs: null,
-      })
-      const capture = await withTimeout(extractVideoCaptureDateDetails(file), META_TIMEOUT_MS, null)
-      return capture ? { ...base, ...v, capturedAt: capture.capturedAt, capturedAtLocal: capture.capturedLocal, capturedAtOffset: capture.capturedOffset, capturedAtSource: capture.source } : { ...base, ...v, ...fileModifiedFallback(file) }
+      const [v, capture] = await Promise.all([
+        withTimeout(videoMeta(file), META_TIMEOUT_MS, {
+          width: null,
+          height: null,
+          durationMs: null,
+        }),
+        extractCaptureDateMetadata(file),
+      ])
+      return { ...base, ...v, ...capture }
     }
     return base
   } catch {
     return base
+  }
+}
+
+/** Bounded metadata-only path. It never decodes pixels/video or reads the full original. */
+export async function extractCaptureDateMetadata(
+  file: File,
+): Promise<Pick<ExtractedMeta, 'capturedAt' | 'capturedAtLocal' | 'capturedAtOffset' | 'capturedAtSource'>> {
+  const none = { capturedAt: null, capturedAtLocal: null, capturedAtOffset: null, capturedAtSource: null }
+  try {
+    const embedded = isImageUpload(file)
+      ? await withTimeout(extractJpegCaptureDateDetails(file), META_TIMEOUT_MS, null)
+      : isVideoUpload(file)
+        ? await withTimeout(extractVideoCaptureDateDetails(file), META_TIMEOUT_MS, null)
+        : null
+    if (embedded) {
+      return {
+        capturedAt: embedded.capturedAt,
+        capturedAtLocal: embedded.capturedLocal,
+        capturedAtOffset: embedded.capturedOffset,
+        capturedAtSource: embedded.source,
+      }
+    }
+    return isImageUpload(file) || isVideoUpload(file) ? fileModifiedFallback(file) : none
+  } catch {
+    return isImageUpload(file) || isVideoUpload(file) ? fileModifiedFallback(file) : none
   }
 }
 

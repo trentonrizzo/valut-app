@@ -1,5 +1,6 @@
 import { requireAuthenticatedUser } from './_auth.js'
 import { readJsonBody, sendJson } from './_json.js'
+import { resolveMegaPublicMetadata } from './_mega.js'
 
 /**
  * Single Hobby-plan-friendly AI endpoint.
@@ -130,15 +131,6 @@ export default async function handler(req, res) {
     return sendJson(res, e?.statusCode || 401, { error: e?.message || 'Unauthorized' })
   }
 
-  const key = process.env.OPENAI_API_KEY || process.env.VAULT_AI_API_KEY
-  if (!key) {
-    return sendJson(res, 503, {
-      error: 'AI provider not configured',
-      hint: 'Set OPENAI_API_KEY or VAULT_AI_API_KEY for LLM/vision. Metadata tools still work.',
-      analysisVersion: ANALYSIS_VERSION,
-    })
-  }
-
   let body
   try {
     body = await readJsonBody(req)
@@ -147,7 +139,30 @@ export default async function handler(req, res) {
   }
 
   const action = String(body?.action || (body?.images ? 'analyze' : 'chat')).toLowerCase()
+  if (action === 'link-metadata') {
+    const url = typeof body?.url === 'string' ? body.url : ''
+    if (!url || url.length > 16_384) return sendJson(res, 400, { error: 'A valid link is required' })
+    try {
+      const metadata = await resolveMegaPublicMetadata(url)
+      return sendJson(res, 200, metadata ? { ok: true, metadata } : { ok: true, metadata: null })
+    } catch (error) {
+      return sendJson(res, 200, {
+        ok: false,
+        metadata: null,
+        error: error instanceof Error ? error.message : 'Provider metadata unavailable',
+      })
+    }
+  }
+
+  const key = process.env.OPENAI_API_KEY || process.env.VAULT_AI_API_KEY
+  if (!key) {
+    return sendJson(res, 503, {
+      error: 'AI provider not configured',
+      hint: 'Set OPENAI_API_KEY or VAULT_AI_API_KEY for LLM/vision. Metadata tools still work.',
+      analysisVersion: ANALYSIS_VERSION,
+    })
+  }
   if (action === 'analyze') return handleAnalyze(req, res, key, body)
   if (action === 'chat') return handleChat(req, res, key, body)
-  return sendJson(res, 400, { error: 'action must be chat or analyze' })
+  return sendJson(res, 400, { error: 'action must be chat, analyze, or link-metadata' })
 }

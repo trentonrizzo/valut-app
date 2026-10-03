@@ -1,6 +1,7 @@
-/** First-class saved links. URLs never leave Supabase for preview/metadata services. */
+/** First-class saved links. Provider enrichment is explicit and limited to the URL's own provider. */
 import { supabase } from './supabase'
 import { displayDomain, normalizeSafeHttpUrl, type ParsedLink } from './linkParser'
+import { providerForUrl } from './linkMetadata'
 
 export type VaultLink = {
   id: string
@@ -8,6 +9,11 @@ export type VaultLink = {
   url: string
   domain: string | null
   title: string | null
+  automatic_title: string | null
+  provider: string | null
+  provider_created_at: string | null
+  metadata_status: string | null
+  metadata_updated_at: string | null
   notes: string | null
   preview_image_url: string | null
   favorite: boolean
@@ -22,6 +28,11 @@ export type VaultLink = {
 
 export type LinkImportResult = { created: VaultLink[]; failed: { url: string; error: string }[]; skippedExisting: number }
 
+/** Manual names are authoritative; provider metadata is a non-destructive fallback. */
+export function displayLinkName(link: Pick<VaultLink, 'title' | 'automatic_title' | 'domain'>): string {
+  return link.title?.trim() || link.automatic_title?.trim() || link.domain || 'Link'
+}
+
 export async function listLinks(
   userId: string,
   options: { includeDeleted?: boolean; search?: string; favorite?: boolean; albumId?: string | null; tagIds?: string[]; tagMode?: 'and' | 'or' } = {},
@@ -31,7 +42,7 @@ export async function listLinks(
   if (options.favorite != null) q = q.eq('favorite', options.favorite)
   if (options.search?.trim()) {
     const term = options.search.trim().replace(/[%(),]/g, ' ').slice(0, 100)
-    q = q.or(`title.ilike.%${term}%,domain.ilike.%${term}%,url.ilike.%${term}%,notes.ilike.%${term}%`)
+    q = q.or(`title.ilike.%${term}%,automatic_title.ilike.%${term}%,provider.ilike.%${term}%,domain.ilike.%${term}%,url.ilike.%${term}%,notes.ilike.%${term}%`)
   }
   if (options.albumId) {
     const { data } = await supabase.from('album_links').select('link_id').eq('user_id', userId).eq('album_id', options.albumId)
@@ -62,7 +73,16 @@ export async function listLinks(
 export async function createLink(userId: string, input: { url: string; title?: string; notes?: string }): Promise<VaultLink> {
   const url = normalizeSafeHttpUrl(input.url)
   if (!url) throw new Error('Only valid http:// or https:// links can be saved.')
-  const row = { user_id: userId, url, domain: displayDomain(url), title: input.title?.trim() || null, notes: input.notes?.trim() || null }
+  const provider = providerForUrl(url)
+  const row = {
+    user_id: userId,
+    url,
+    domain: displayDomain(url),
+    title: input.title?.trim() || null,
+    notes: input.notes?.trim() || null,
+    provider,
+    metadata_status: provider ? 'pending' : 'unavailable',
+  }
   const { data, error } = await supabase.from('vault_links').insert(row).select('*').single()
   if (error) throw new Error(error.message)
   return data as VaultLink
@@ -103,6 +123,11 @@ export async function updateLink(userId: string, id: string, patch: Partial<Pick
     if (!url) throw new Error('Only valid http:// or https:// links can be saved.')
     next.url = url
     next.domain = displayDomain(url)
+    next.provider = providerForUrl(url)
+    next.metadata_status = providerForUrl(url) ? 'pending' : 'unavailable'
+    next.metadata_updated_at = null
+    next.automatic_title = null
+    next.provider_created_at = null
   }
   const { error } = await supabase.from('vault_links').update(next).eq('id', id).eq('user_id', userId)
   if (error) throw new Error(error.message)
@@ -157,4 +182,25 @@ export async function permanentlyDeleteLinks(userId: string, linkIds: string[]):
 export async function relateLinkToFile(userId: string, linkId: string, fileId: string): Promise<void> {
   const { error } = await supabase.from('link_files').upsert({ user_id: userId, link_id: linkId, file_id: fileId }, { onConflict: 'link_id,file_id', ignoreDuplicates: true })
   if (error) throw new Error(error.message)
+}
+
+export async function loadLinkRelations(userId: string, linkId: string): Promise<{ albums: string[]; tags: string[] }> {
+  const [{ data: albumRows, error: albumError }, { data: tagRows, error: tagError }] = await Promise.all([
+    supabase.from('album_links').select('album_id').eq('user_id', userId).eq('link_id', linkId),
+    supabase.from('link_tags').select('tag_id').eq('user_id', userId).eq('link_id', linkId),
+  ])
+  if (albumError) throw new Error(albumError.message)
+  if (tagError) throw new Error(tagError.message)
+  const albumIds = (albumRows ?? []).map((row) => row.album_id)
+  const tagIds = (tagRows ?? []).map((row) => row.tag_id)
+  const [{ data: albums, error: albumsError }, { data: tags, error: tagsError }] = await Promise.all([
+    albumIds.length ? supabase.from('albums').select('name').eq('user_id', userId).in('id', albumIds) : Promise.resolve({ data: [], error: null }),
+    tagIds.length ? supabase.from('tags').select('name').eq('user_id', userId).in('id', tagIds) : Promise.resolve({ data: [], error: null }),
+  ])
+  if (albumsError) throw new Error(albumsError.message)
+  if (tagsError) throw new Error(tagsError.message)
+  return {
+    albums: (albums ?? []).map((row) => row.name),
+    tags: (tags ?? []).map((row) => row.name),
+  }
 }

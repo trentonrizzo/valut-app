@@ -6,6 +6,16 @@ import { ConfirmLogoutModal } from '../components/ConfirmLogoutModal'
 import { clearVaultPin, setVaultPin, vaultPinIsSet, verifyVaultPin } from '../lib/vaultPin'
 import { Link } from 'react-router-dom'
 import { fetchVaultStorageStats, formatStorageLine, type VaultStorageStats } from '../lib/storageStats'
+
+type CaptureCursor = { createdAt: string | null; id: string | null; done: boolean }
+
+function captureCursorKey(userId: string) { return `vault-capture-backfill-v2:${userId}` }
+function loadCaptureCursor(userId: string): CaptureCursor | null {
+  try { return JSON.parse(localStorage.getItem(captureCursorKey(userId)) || 'null') as CaptureCursor | null } catch { return null }
+}
+function saveCaptureCursor(userId: string, cursor: CaptureCursor) {
+  try { localStorage.setItem(captureCursorKey(userId), JSON.stringify(cursor)) } catch { /* optional resume checkpoint */ }
+}
 import { backfillCaptureDatesBatch, hashMissingBatch } from '../lib/mediaIndexBackfill'
 
 export function Settings() {
@@ -192,8 +202,9 @@ export function Settings() {
                 setBusy(true)
                 setMsg(null)
                 try {
-                  let cursorCreatedAt: string | null = null
-                  let cursorId: string | null = null
+                  const saved = loadCaptureCursor(user.id)
+                  let cursorCreatedAt: string | null = saved?.done ? null : saved?.createdAt ?? null
+                  let cursorId: string | null = saved?.done ? null : saved?.id ?? null
                   let hashed = 0
                   let failed = 0
                   let skipped = 0
@@ -211,6 +222,7 @@ export function Settings() {
                     skipped += batch.skipped
                     cursorCreatedAt = batch.nextCursorCreatedAt
                     cursorId = batch.nextCursorId
+                    saveCaptureCursor(user.id, { createdAt: cursorCreatedAt, id: cursorId, done: batch.done })
                     if (batch.done) break
                   }
                   setMsg(
@@ -239,6 +251,8 @@ export function Settings() {
                   let cursorId: string | null = null
                   let updated = 0
                   let skipped = 0
+                  let unknown = 0
+                  let technicalSkipped = 0
                   let failed = 0
                   for (let i = 0; i < 20; i++) {
                     const batch = await backfillCaptureDatesBatch({
@@ -251,13 +265,15 @@ export function Settings() {
                     })
                     updated += batch.updated
                     skipped += batch.skipped
+                    unknown += batch.unknown
+                    technicalSkipped += batch.technicalSkipped
                     failed += batch.failed
                     cursorCreatedAt = batch.nextCursorCreatedAt
                     cursorId = batch.nextCursorId
                     if (batch.done) break
                   }
                   setMsg(
-                    `Capture dates: ${updated} recovered, ${skipped} unknown/skipped, ${failed} failed (never guessed).`,
+                    `Capture dates: ${updated} recovered, ${unknown} unknown, ${technicalSkipped} safely skipped, ${failed} failed (never guessed; ${skipped} total without a date).`,
                   )
                 } catch (e) {
                   setMsg(e instanceof Error ? e.message : 'Capture backfill failed')

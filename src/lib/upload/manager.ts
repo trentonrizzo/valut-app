@@ -26,7 +26,7 @@ import {
 import { deleteJob, listJobs, saveJob, type PersistedUploadJob, type UploadUiState } from './queueStore'
 import { fileConcurrency, isIosDevice, partConcurrency, partGapMs, putWithRetry, sleep } from './multipartConfig'
 import { getPreferredUploadMode, normalizeUploadMode, setPreferredUploadMode, type UploadMode } from './uploadMode'
-import { extractMediaMetadata, fileModifiedFallback, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
+import { extractCaptureDateMetadata, extractMediaMetadata, fileModifiedFallback, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
 import { sha256HexOfFileBestEffort } from './contentHash'
 import {
   canCatalogReady,
@@ -477,6 +477,31 @@ async function runJob(id: string) {
           await persist(job)
         } catch (metaErr) {
           logUploadSelection('metadata-failed', {
+            name: file.name,
+            error: metaErr instanceof Error ? metaErr.message : String(metaErr),
+          })
+        }
+      } else {
+        try {
+          const capture = await extractCaptureDateMetadata(file)
+          job = {
+            ...job,
+            capturedAt: capture.capturedAtSource ? capture.capturedAt : job.capturedAt,
+            capturedAtLocal: capture.capturedAtSource ? capture.capturedAtLocal : job.capturedAtLocal,
+            capturedAtOffset: capture.capturedAtSource ? capture.capturedAtOffset : job.capturedAtOffset,
+            capturedAtSource: capture.capturedAtSource ?? job.capturedAtSource,
+            type: normalizeUploadMime(file) || job.type,
+            originalFilename: job.originalFilename ?? file.name,
+          }
+          await persist(job)
+          logUploadSelection('metadata-bounded-legacy', {
+            name: file.name,
+            capturedAt: capture.capturedAt,
+            capturedAtLocal: capture.capturedAtLocal,
+            capturedAtSource: capture.capturedAtSource,
+          })
+        } catch (metaErr) {
+          logUploadSelection('metadata-bounded-legacy-failed', {
             name: file.name,
             error: metaErr instanceof Error ? metaErr.message : String(metaErr),
           })
