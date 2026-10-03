@@ -262,9 +262,15 @@ export function FullScreenMediaViewer() {
   useEffect(() => {
     const el = stageRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => setSlideW(el.clientWidth))
+    const updateSlideWidth = () => setSlideW(el.clientWidth)
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateSlideWidth)
+      updateSlideWidth()
+      return () => window.removeEventListener('resize', updateSlideWidth)
+    }
+    const ro = new ResizeObserver(updateSlideWidth)
     ro.observe(el)
-    setSlideW(el.clientWidth)
+    updateSlideWidth()
     return () => ro.disconnect()
   }, [loading])
 

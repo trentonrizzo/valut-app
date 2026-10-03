@@ -25,6 +25,11 @@ export function AlbumCardCoverVideo({ src, className }: Props) {
       })
     }
 
+    if (typeof IntersectionObserver === 'undefined') {
+      tryPlay()
+      return () => video.pause()
+    }
+
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
