@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import type { FileRow } from '../../types/media'
-import { formatBytes } from '../../lib/formatBytes'
+import { formatBytesExact } from '../../lib/formatBytes'
 import { loadMediaDetails, type MediaDetailsModel } from '../../lib/mediaDetails'
 import { useAuth } from '../../context/useAuth'
 import { useToast } from '../../context/useToast'
 import { addTagsToFiles, removeTagsFromFiles } from '../../lib/tags'
 import { TagPickerModal } from '../library/TagPickerModal'
 import { setFavorite } from '../../lib/albumMembership'
+import { isVideoMime } from '../../lib/mediaTypes'
+import { calculateOverallBitrate, type TechnicalMediaMetadata } from '../../lib/upload/technicalMetadata'
 
 type Props = {
   file: FileRow | null
@@ -33,9 +35,53 @@ function fmtCaptured(file: FileRow): string {
 function fmtDuration(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return '—'
   const s = Math.round(ms / 1000)
-  const m = Math.floor(s / 60)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
   const r = s % 60
-  return m > 0 ? `${m}m ${r}s` : `${r}s`
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`
+}
+
+function technical(file: FileRow): TechnicalMediaMetadata | null {
+  const value = file.metadata_json?.technicalMetadata
+  return value && typeof value === 'object' ? value as TechnicalMediaMetadata : null
+}
+
+function sourceSize(file: FileRow): number | null {
+  const value = file.metadata_json?.sourceSizeBytes
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : file.file_size_bytes
+}
+
+function fmtRate(value: number | null | undefined): string {
+  return value && Number.isFinite(value) ? `${Number(value.toFixed(3))} fps` : 'Unknown'
+}
+
+function fmtBitrate(value: number | null | undefined): string {
+  if (!value || !Number.isFinite(value)) return 'Unknown'
+  return `~${(value / 1_000_000).toFixed(value >= 10_000_000 ? 1 : 2)} Mbps (overall file bitrate)`
+}
+
+function integrityLabel(file: FileRow): string {
+  const evidence = file.metadata_json?.integrityEvidence
+  const expected = evidence && typeof evidence === 'object'
+    ? (evidence as { expectedStoredBytes?: unknown }).expectedStoredBytes
+    : null
+  const verified = evidence && typeof evidence === 'object'
+    ? (evidence as { verifiedStoredBytes?: unknown }).verifiedStoredBytes
+    : null
+  if (evidence && typeof evidence === 'object'
+    && (evidence as { method?: unknown }).method === 'r2_head_size'
+    && typeof expected === 'number'
+    && Number.isSafeInteger(expected)
+    && expected >= 0
+    && expected === verified) {
+    return 'Verified (stored object exists and size matches)'
+  }
+  if (file.storage_integrity === 'missing') return 'Missing'
+  if (file.storage_integrity === 'problem') return 'Problem'
+  if (file.upload_status === 'ready') return 'Upload complete'
+  return 'Unknown'
 }
 
 export function MediaDetailsSheet({ file, onClose, onChanged }: Props) {
@@ -68,22 +114,39 @@ export function MediaDetailsSheet({ file, onClose, onChanged }: Props) {
 
   if (!file) return null
 
+  const tech = technical(file)
+  const video = isVideoMime(file.mime_type, file.file_name)
+  const width = file.width ?? tech?.width ?? null
+  const height = file.height ?? tech?.height ?? null
+  const durationMs = file.duration_ms ?? tech?.durationMs ?? null
+  const selectedSize = sourceSize(file)
+  const bitrate = tech?.overallBitrateBps ?? calculateOverallBitrate(selectedSize ?? -1, durationMs)
+
   const rows: { label: string; value: string }[] = [
     { label: 'Filename', value: file.file_name },
     {
       label: 'Original filename',
       value: String((file as FileRow & { original_filename?: string | null }).original_filename || file.file_name),
     },
-    { label: 'Type', value: file.mime_type || 'Unknown' },
     { label: 'Created', value: fmtCaptured(file) },
     { label: 'Uploaded', value: fmtDate(file.created_at) },
-    { label: 'Size', value: file.file_size_bytes != null ? formatBytes(file.file_size_bytes) : 'Unknown' },
-    { label: 'Duration', value: fmtDuration(file.duration_ms) },
-    {
-      label: 'Dimensions',
-      value: file.width && file.height ? `${file.width}×${file.height}` : 'Unknown',
-    },
-    { label: 'Resolution', value: model?.resolutionLabel || '—' },
+    ...(video ? [
+      { label: 'Duration', value: fmtDuration(durationMs) },
+      { label: 'Resolution', value: width && height ? `${width} × ${height}` : 'Unknown' },
+      { label: 'Video codec', value: tech?.videoCodec || 'Unknown' },
+      { label: 'Container', value: tech?.container || 'Unknown' },
+      { label: 'MIME type', value: file.mime_type || 'Unknown' },
+      { label: 'Frame rate', value: fmtRate(tech?.frameRate) },
+      { label: 'Overall bitrate', value: fmtBitrate(bitrate) },
+      { label: 'Audio codec', value: tech?.audioCodec || 'Unknown' },
+    ] : [
+      { label: 'Resolution', value: width && height ? `${width} × ${height}` : 'Unknown' },
+      { label: 'Format', value: tech?.format || file.mime_type?.replace(/^image\//, '').toUpperCase() || 'Unknown' },
+      { label: 'MIME type', value: file.mime_type || 'Unknown' },
+    ]),
+    { label: 'Original selected size', value: formatBytesExact(selectedSize) },
+    { label: 'Stored object size', value: formatBytesExact(file.stored_size_bytes) },
+    { label: 'Upload integrity', value: integrityLabel(file) },
     { label: 'Aspect ratio', value: model?.aspectRatio || '—' },
     { label: 'Favorite', value: favorite ? 'Yes' : 'No' },
     { label: 'Duplicate', value: model?.duplicateHint || 'Not indexed / unique' },

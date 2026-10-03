@@ -3,8 +3,13 @@
  * Video poster/metadata must never block upload finalization.
  */
 import { isImageUpload, isVideoUpload, normalizeUploadMime } from './strategy'
-import { extractJpegCaptureDateDetails, type CaptureDateResult } from './exifCaptureDate'
-import { extractVideoCaptureDateDetails } from './videoCaptureDate'
+import { extractImageCaptureDateFromBuffer, type CaptureDateResult } from './exifCaptureDate'
+import { extractVideoCaptureDateFromSegments } from './videoCaptureDate'
+import {
+  extractTechnicalMetadataFromSegments,
+  readBoundedMetadataSegments,
+  type TechnicalMediaMetadata,
+} from './technicalMetadata'
 
 export type ExtractedMeta = {
   width: number | null
@@ -15,6 +20,7 @@ export type ExtractedMeta = {
   capturedAtOffset: string | null
   capturedAtSource: CaptureDateResult['source'] | null
   mime: string
+  technicalMetadata: TechnicalMediaMetadata | null
 }
 
 const META_TIMEOUT_MS = 4000
@@ -47,25 +53,39 @@ export async function extractMediaMetadata(file: File): Promise<ExtractedMeta> {
     capturedAtOffset: null,
     capturedAtSource: null,
     mime,
+    technicalMetadata: null,
   }
   try {
     if (isImageUpload(file)) {
-      const [dim, capture] = await Promise.all([
+      const [dim, bounded] = await Promise.all([
         withTimeout(imageSize(file), META_TIMEOUT_MS, { width: null, height: null }),
-        extractCaptureDateMetadata(file),
+        extractBoundedMediaMetadata(file),
       ])
-      return { ...base, ...dim, ...capture }
+      return {
+        ...base,
+        width: dim.width ?? bounded.technicalMetadata?.width ?? null,
+        height: dim.height ?? bounded.technicalMetadata?.height ?? null,
+        ...bounded.capture,
+        technicalMetadata: bounded.technicalMetadata,
+      }
     }
     if (isVideoUpload(file)) {
-      const [v, capture] = await Promise.all([
+      const [v, bounded] = await Promise.all([
         withTimeout(videoMeta(file), META_TIMEOUT_MS, {
           width: null,
           height: null,
           durationMs: null,
         }),
-        extractCaptureDateMetadata(file),
+        extractBoundedMediaMetadata(file),
       ])
-      return { ...base, ...v, ...capture }
+      return {
+        ...base,
+        width: v.width ?? bounded.technicalMetadata?.width ?? null,
+        height: v.height ?? bounded.technicalMetadata?.height ?? null,
+        durationMs: v.durationMs ?? bounded.technicalMetadata?.durationMs ?? null,
+        ...bounded.capture,
+        technicalMetadata: bounded.technicalMetadata,
+      }
     }
     return base
   } catch {
@@ -77,24 +97,38 @@ export async function extractMediaMetadata(file: File): Promise<ExtractedMeta> {
 export async function extractCaptureDateMetadata(
   file: File,
 ): Promise<Pick<ExtractedMeta, 'capturedAt' | 'capturedAtLocal' | 'capturedAtOffset' | 'capturedAtSource'>> {
+  return (await extractBoundedMediaMetadata(file)).capture
+}
+
+export async function extractBoundedMediaMetadata(file: File): Promise<{
+  capture: Pick<ExtractedMeta, 'capturedAt' | 'capturedAtLocal' | 'capturedAtOffset' | 'capturedAtSource'>
+  technicalMetadata: TechnicalMediaMetadata | null
+}> {
   const none = { capturedAt: null, capturedAtLocal: null, capturedAtOffset: null, capturedAtSource: null }
   try {
-    const embedded = isImageUpload(file)
-      ? await withTimeout(extractJpegCaptureDateDetails(file), META_TIMEOUT_MS, null)
-      : isVideoUpload(file)
-        ? await withTimeout(extractVideoCaptureDateDetails(file), META_TIMEOUT_MS, null)
-        : null
+    const kind = isImageUpload(file) ? 'image' : isVideoUpload(file) ? 'video' : null
+    if (!kind) return { capture: none, technicalMetadata: null }
+    const segments = await withTimeout(readBoundedMetadataSegments(file, kind), META_TIMEOUT_MS, [] as ArrayBuffer[])
+    const embedded = kind === 'image'
+      ? extractImageCaptureDateFromBuffer(segments[0] ?? new ArrayBuffer(0))
+      : extractVideoCaptureDateFromSegments(segments)
+    const technicalMetadata = segments.length
+      ? extractTechnicalMetadataFromSegments(segments, { name: file.name, mime: normalizeUploadMime(file), size: file.size, kind })
+      : null
     if (embedded) {
-      return {
-        capturedAt: embedded.capturedAt,
-        capturedAtLocal: embedded.capturedLocal,
-        capturedAtOffset: embedded.capturedOffset,
-        capturedAtSource: embedded.source,
-      }
+      return { capture: {
+          capturedAt: embedded.capturedAt,
+          capturedAtLocal: embedded.capturedLocal,
+          capturedAtOffset: embedded.capturedOffset,
+          capturedAtSource: embedded.source,
+        }, technicalMetadata }
     }
-    return isImageUpload(file) || isVideoUpload(file) ? fileModifiedFallback(file) : none
+    return { capture: fileModifiedFallback(file), technicalMetadata }
   } catch {
-    return isImageUpload(file) || isVideoUpload(file) ? fileModifiedFallback(file) : none
+    return {
+      capture: isImageUpload(file) || isVideoUpload(file) ? fileModifiedFallback(file) : none,
+      technicalMetadata: null,
+    }
   }
 }
 

@@ -16,7 +16,14 @@ function loadCaptureCursor(userId: string): CaptureCursor | null {
 function saveCaptureCursor(userId: string, cursor: CaptureCursor) {
   try { localStorage.setItem(captureCursorKey(userId), JSON.stringify(cursor)) } catch { /* optional resume checkpoint */ }
 }
-import { backfillCaptureDatesBatch, hashMissingBatch } from '../lib/mediaIndexBackfill'
+function metadataCursorKey(userId: string) { return `vault-media-metadata-backfill-v1:${userId}` }
+function loadMetadataCursor(userId: string): CaptureCursor | null {
+  try { return JSON.parse(localStorage.getItem(metadataCursorKey(userId)) || 'null') as CaptureCursor | null } catch { return null }
+}
+function saveMetadataCursor(userId: string, cursor: CaptureCursor) {
+  try { localStorage.setItem(metadataCursorKey(userId), JSON.stringify(cursor)) } catch { /* optional resume checkpoint */ }
+}
+import { backfillMediaMetadataBatch, hashMissingBatch } from '../lib/mediaIndexBackfill'
 
 export function Settings() {
   const { user, session, signOut } = useAuth()
@@ -247,15 +254,18 @@ export function Settings() {
                 setBusy(true)
                 setMsg(null)
                 try {
-                  let cursorCreatedAt: string | null = null
-                  let cursorId: string | null = null
+                  const saved = loadMetadataCursor(user.id)
+                  let cursorCreatedAt: string | null = saved?.done ? null : saved?.createdAt ?? null
+                  let cursorId: string | null = saved?.done ? null : saved?.id ?? null
                   let updated = 0
                   let skipped = 0
                   let unknown = 0
                   let technicalSkipped = 0
+                  let technicalUpdated = 0
+                  let integrityVerified = 0
                   let failed = 0
                   for (let i = 0; i < 20; i++) {
-                    const batch = await backfillCaptureDatesBatch({
+                    const batch = await backfillMediaMetadataBatch({
                       userId: user.id,
                       accessToken: session.access_token,
                       masterKey,
@@ -267,22 +277,25 @@ export function Settings() {
                     skipped += batch.skipped
                     unknown += batch.unknown
                     technicalSkipped += batch.technicalSkipped
+                    technicalUpdated += batch.technicalUpdated
+                    integrityVerified += batch.integrityVerified
                     failed += batch.failed
                     cursorCreatedAt = batch.nextCursorCreatedAt
                     cursorId = batch.nextCursorId
+                    saveMetadataCursor(user.id, { createdAt: cursorCreatedAt, id: cursorId, done: batch.done })
                     if (batch.done) break
                   }
                   setMsg(
-                    `Capture dates: ${updated} recovered, ${unknown} unknown, ${technicalSkipped} safely skipped, ${failed} failed (never guessed; ${skipped} total without a date).`,
+                    `Media metadata: ${updated} Created dates recovered, ${technicalUpdated} technical records, ${integrityVerified} storage objects verified, ${unknown} dates unknown, ${technicalSkipped} safely skipped, ${failed} failed (${skipped} unchanged).`,
                   )
                 } catch (e) {
-                  setMsg(e instanceof Error ? e.message : 'Capture backfill failed')
+                setMsg(e instanceof Error ? e.message : 'Media metadata backfill failed')
                 } finally {
                   setBusy(false)
                 }
               }}
             >
-              Recover capture dates (safe batch)
+              Recover media details (safe resumable batch)
             </button>
             {msg ? <p className="settings-placeholder">{msg}</p> : null}
           </div>

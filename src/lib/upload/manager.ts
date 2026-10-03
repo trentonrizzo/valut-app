@@ -26,7 +26,7 @@ import {
 import { deleteJob, listJobs, saveJob, type PersistedUploadJob, type UploadUiState } from './queueStore'
 import { fileConcurrency, isIosDevice, partConcurrency, partGapMs, putWithRetry, sleep } from './multipartConfig'
 import { getPreferredUploadMode, normalizeUploadMode, setPreferredUploadMode, type UploadMode } from './uploadMode'
-import { extractCaptureDateMetadata, extractMediaMetadata, fileModifiedFallback, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
+import { extractBoundedMediaMetadata, extractMediaMetadata, fileModifiedFallback, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
 import { sha256HexOfFileBestEffort } from './contentHash'
 import {
   canCatalogReady,
@@ -467,6 +467,7 @@ async function runJob(id: string) {
             width: job.width ?? meta.width,
             height: job.height ?? meta.height,
             durationMs: job.durationMs ?? meta.durationMs,
+            technicalMetadata: meta.technicalMetadata ?? job.technicalMetadata ?? null,
             capturedAt: meta.capturedAtSource ? meta.capturedAt : job.capturedAt,
             capturedAtLocal: meta.capturedAtSource ? meta.capturedAtLocal : job.capturedAtLocal,
             capturedAtOffset: meta.capturedAtSource ? meta.capturedAtOffset : job.capturedAtOffset,
@@ -483,9 +484,14 @@ async function runJob(id: string) {
         }
       } else {
         try {
-          const capture = await extractCaptureDateMetadata(file)
+          const bounded = await extractBoundedMediaMetadata(file)
+          const capture = bounded.capture
           job = {
             ...job,
+            width: job.width ?? bounded.technicalMetadata?.width ?? null,
+            height: job.height ?? bounded.technicalMetadata?.height ?? null,
+            durationMs: job.durationMs ?? bounded.technicalMetadata?.durationMs ?? null,
+            technicalMetadata: bounded.technicalMetadata ?? job.technicalMetadata ?? null,
             capturedAt: capture.capturedAtSource ? capture.capturedAt : job.capturedAt,
             capturedAtLocal: capture.capturedAtSource ? capture.capturedAtLocal : job.capturedAtLocal,
             capturedAtOffset: capture.capturedAtSource ? capture.capturedAtOffset : job.capturedAtOffset,
@@ -507,7 +513,7 @@ async function runJob(id: string) {
           })
         }
       }
-      if (!browserCapabilities.isLegacyMode && !job.contentHash && file.size > 0 && file.size <= 512 * 1024 * 1024) {
+      if (!browserCapabilities.isLegacyMode && !job.contentHash && file.size > 0 && file.size <= 64 * 1024 * 1024) {
         try {
           const hash = await sha256HexOfFileBestEffort(file)
           if (hash) {
@@ -712,7 +718,18 @@ async function finalizeCatalog(
     metadata_json: {
       fileNonce: job.fileNonceB64,
       captureDateSource: job.capturedAtSource ?? null,
+      sourceSizeBytes: job.size,
+      technicalMetadata: job.technicalMetadata ?? null,
+      integrityEvidence: job.r2Verified && job.verifiedSize === expectedVerifySize(job)
+        ? {
+            method: 'r2_head_size',
+            expectedStoredBytes: expectedVerifySize(job),
+            verifiedStoredBytes: job.verifiedSize,
+            verifiedAt: new Date().toISOString(),
+          }
+        : null,
     },
+    storage_integrity: job.r2Verified && job.verifiedSize === expectedVerifySize(job) ? 'ready' : 'problem',
     original_filename: job.originalFilename ?? job.fileName,
     checksum: job.contentHash ?? null,
     content_hash: job.contentHash ?? null,
@@ -748,6 +765,7 @@ async function finalizeCatalog(
         wrapped_dek: insert.wrapped_dek,
         encryption_chunk_size: insert.encryption_chunk_size,
         metadata_json: insert.metadata_json,
+        storage_integrity: insert.storage_integrity,
         checksum: insert.checksum,
       }
       const { error: legacyErr } = await supabase.from('files').upsert(legacy, { onConflict: 'id', ignoreDuplicates: true })

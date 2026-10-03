@@ -13,8 +13,8 @@ import { TagPickerModal } from '../components/library/TagPickerModal'
 import { addTagsToFiles, removeTagsFromFiles } from '../lib/tags'
 import { useMediaSelection } from '../context/SelectionContext'
 import { isV11SchemaReady } from '../lib/schemaGuard'
-import { formatBytes } from '../lib/formatBytes'
 import { isVideoFileName } from '../lib/mediaTypes'
+import type { FileRow as MediaFileRow } from '../types/media'
 import type { AlbumRow, AlbumWithMeta } from '../types/album'
 import { AlbumGrid } from '../components/albums/AlbumGrid'
 import { CreateAlbumModal } from '../components/albums/CreateAlbumModal'
@@ -22,6 +22,7 @@ import { RenameAlbumModal } from '../components/albums/RenameAlbumModal'
 import { ConfirmDeleteAlbumModal } from '../components/albums/ConfirmDeleteAlbumModal'
 import { AlbumCoverPickerModal } from '../components/albums/AlbumCoverPickerModal'
 import { VaultPhotoTileMedia } from '../components/files/VaultPhotoTile'
+import { MediaDetailsSheet } from '../components/files/MediaDetailsSheet'
 import { UploadQueueOverlay, type UploadQueueItem } from '../components/UploadQueueOverlay'
 import { batchUploadFilesToAlbum, validateUploadFileSizes } from '../lib/batchUploadToAlbum'
 import { filesFromInput, logUploadSelection, selectionFailureReason } from '../lib/upload/selectFiles'
@@ -161,7 +162,7 @@ export function Dashboard() {
   )
 
   const [fileActionTarget, setFileActionTarget] = useState<FileRow | null>(null)
-  const [fileInfoTarget, setFileInfoTarget] = useState<FileRow | null>(null)
+  const [fileInfoTarget, setFileInfoTarget] = useState<MediaFileRow | null>(null)
 
   const fileActionMedia = useDecryptedMediaSrc(
     fileActionTarget?.file_url ?? null,
@@ -1353,9 +1354,21 @@ export function Dashboard() {
                     <button
                       type="button"
                       className="vault-action-sheet__item"
-                      onClick={() => {
-                        setFileInfoTarget(fileActionTarget)
+                      onClick={async () => {
+                        if (!user) return
+                        const targetId = fileActionTarget.id
                         setFileActionTarget(null)
+                        const { data, error } = await supabase
+                          .from('files')
+                          .select('*')
+                          .eq('id', targetId)
+                          .eq('user_id', user.id)
+                          .maybeSingle()
+                        if (error || !data) {
+                          showToast(error?.message || 'Details are available after the upload finishes', 'error')
+                          return
+                        }
+                        setFileInfoTarget(data as MediaFileRow)
                       }}
                     >
                       File details
@@ -1372,52 +1385,10 @@ export function Dashboard() {
               </div>
             ) : null}
 
-            {fileInfoTarget ? (
-              <div
-                className="modal-backdrop"
-                role="presentation"
-                onClick={() => setFileInfoTarget(null)}
-              >
-                <div
-                  className="modal modal--enter"
-                  role="dialog"
-                  aria-modal="true"
-                  aria-labelledby="vault-file-info-title"
-                  onClick={(ev) => ev.stopPropagation()}
-                >
-                  <h2 id="vault-file-info-title" className="modal__title">
-                    File details
-                  </h2>
-                  <dl className="vault-file-info-dl">
-                    <div>
-                      <dt>Name</dt>
-                      <dd title={fileInfoTarget.file_name}>{fileInfoTarget.file_name}</dd>
-                    </div>
-                    <div>
-                      <dt>Date</dt>
-                      <dd>{new Date(fileInfoTarget.created_at).toLocaleString()}</dd>
-                    </div>
-                    <div>
-                      <dt>Type</dt>
-                      <dd>
-                        {fileInfoTarget.mime_type?.trim()
-                          ? fileInfoTarget.mime_type
-                          : isVideoFileName(fileInfoTarget.file_name)
-                            ? 'Video'
-                            : 'Image'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Size</dt>
-                      <dd>{formatBytes(fileInfoTarget.file_size_bytes ?? undefined)}</dd>
-                    </div>
-                  </dl>
-                  <button type="button" className="btn btn--primary" onClick={() => setFileInfoTarget(null)}>
-                    Done
-                  </button>
-                </div>
-              </div>
-            ) : null}
+            <MediaDetailsSheet
+              file={fileInfoTarget}
+              onClose={() => setFileInfoTarget(null)}
+            />
 
           </section>
         )}

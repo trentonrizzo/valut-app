@@ -115,7 +115,35 @@ describe('data-safety source contracts', () => {
 
   it('keeps bounded capture extraction active in legacy upload mode', () => {
     const src = readFileSync(join(root, 'src/lib/upload/manager.ts'), 'utf8')
-    expect(src).toContain('extractCaptureDateMetadata(file)')
+    expect(src).toContain('extractBoundedMediaMetadata(file)')
     expect(src).toContain("logUploadSelection('metadata-bounded-legacy'")
+  })
+
+  it('persists the exact selected and verified stored byte counts without transforming originals', () => {
+    const src = readFileSync(join(root, 'src/lib/upload/manager.ts'), 'utf8')
+    expect(src).toContain('file_size_bytes: job.size')
+    expect(src).toContain('stored_size_bytes: expectedVerifySize(job)')
+    expect(src).toContain('sourceSizeBytes: job.size')
+    expect(src).toContain("method: 'r2_head_size'")
+    expect(src).toContain("storage_integrity: job.r2Verified")
+    expect(src).not.toMatch(/transcod|recompress|downscale/i)
+  })
+
+  it('backfills metadata with bounded range reads and never rewrites originals', () => {
+    const src = readFileSync(join(root, 'src/lib/mediaIndexBackfill.ts'), 'utf8')
+    expect(src).toContain('backfillMediaMetadataBatch')
+    expect(src).toContain('fetchBoundedRange')
+    expect(src).toContain('captureMetadataChunkIndexes')
+    expect(src).toContain('apiVerifyObject')
+    expect(src).not.toContain('PutObjectCommand')
+    expect(src).not.toContain('DeleteObjectCommand')
+  })
+
+  it('uses the authoritative shared Details panel in Library and album views', () => {
+    const dashboard = readFileSync(join(root, 'src/pages/Dashboard.tsx'), 'utf8')
+    const library = readFileSync(join(root, 'src/pages/Library.tsx'), 'utf8')
+    expect(dashboard).toContain('<MediaDetailsSheet')
+    expect(library).toContain('<MediaDetailsSheet')
+    expect(dashboard).not.toContain('vault-file-info-dl')
   })
 })

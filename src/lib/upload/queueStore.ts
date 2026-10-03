@@ -40,6 +40,7 @@ export type PersistedUploadJob = {
   width: number | null
   height: number | null
   durationMs: number | null
+  technicalMetadata?: import('./technicalMetadata').TechnicalMediaMetadata | null
   capturedAt: string | null
   capturedAtLocal?: string | null
   capturedAtOffset?: string | null
