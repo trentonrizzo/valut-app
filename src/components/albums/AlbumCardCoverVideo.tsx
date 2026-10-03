@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { browserCapabilities } from '../../lib/browserCapabilities'
 
 type Props = {
   src: string | null
@@ -14,7 +15,7 @@ export function AlbumCardCoverVideo({ src, className }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!src) return
+    if (!src || !browserCapabilities.shouldRenderAnimatedMediaInGrid) return
     const video = videoRef.current
     const wrap = wrapRef.current
     if (!video || !wrap) return
@@ -50,6 +51,10 @@ export function AlbumCardCoverVideo({ src, className }: Props) {
   }, [src])
 
   if (!src) return null
+
+  if (!browserCapabilities.shouldRenderAnimatedMediaInGrid) {
+    return <div className="album-card__thumb-video-wrap album-card__thumb-video-wrap--static" aria-label="Video cover">▶</div>
+  }
 
   return (
     <div ref={wrapRef} className="album-card__thumb-video-wrap">

@@ -114,7 +114,7 @@ export function UploadQueueOverlay({
       : doneCount === batchTotal && batchTotal > 0
         ? 'Upload complete'
         : batchTotal > 0
-          ? `${Math.min(batchTotal, currentFileIndex)} of ${batchTotal}`
+          ? `Uploading ${Math.min(batchTotal, currentFileIndex)} of ${batchTotal} · ${overallProgress}%`
           : 'Uploading…'
 
   return (
@@ -210,7 +210,6 @@ export function UploadQueueOverlay({
                 ) : item.speedText || item.stateLabel ? (
                   <p className="vault-upload-queue__hint">
                     {item.stateLabel}
-                    {item.modeLabel ? ` · ${item.modeLabel}` : ''}
                     {item.speedText ? ` · ${item.speedText}` : ''}
                     {item.etaText ? ` · ${item.etaText}` : ''}
                   </p>
@@ -233,7 +232,7 @@ export function UploadQueueOverlay({
                   ) : null}
                   {item.needsFile && onReselect ? (
                     <label className="vault-upload-queue__btn btn btn--ghost">
-                      Reselect
+                      Choose File
                       <input
                         type="file"
                         className="visually-hidden"
@@ -247,7 +246,7 @@ export function UploadQueueOverlay({
                   ) : null}
                   {onCancel && item.status !== 'done' ? (
                     <button type="button" className="vault-upload-queue__btn btn btn--ghost" onClick={() => onCancel(item.id)}>
-                      Cancel
+                      {item.status === 'failed' ? 'Remove' : 'Cancel'}
                     </button>
                   ) : null}
                 </div>
@@ -284,7 +283,7 @@ export function UploadQueueOverlay({
           ) : null}
           {hasFailed && onDismiss ? (
             <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onDismiss}>
-              Dismiss failed
+              Remove failed
             </button>
           ) : null}
         </div>

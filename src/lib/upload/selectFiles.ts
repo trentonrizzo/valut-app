@@ -63,6 +63,7 @@ const SAFE_LOG_KEYS = new Set([
   'count',
   'error',
   'httpStatus',
+  'elapsedMs',
 ])
 
 function sanitizeLog(extra: Record<string, unknown>): Record<string, unknown> {

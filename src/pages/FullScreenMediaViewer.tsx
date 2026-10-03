@@ -14,6 +14,9 @@ import {
   playbackFailureMessage,
   type PlaybackFailureKind,
 } from '../lib/playbackError'
+import { browserCapabilities } from '../lib/browserCapabilities'
+import { releaseDecryptedBlobUrlForFile } from '../lib/decryptedBlobCache'
+import { invalidateSignedMedia } from '../lib/media/resolveMedia'
 
 type FileRow = {
   id: string
@@ -73,19 +76,23 @@ function SlideVideo({
   isActive,
   playbackRate,
   loop,
+  legacy,
 }: {
   file: FileRow
   userId: string
   isActive: boolean
   playbackRate: number
   loop: boolean
+  legacy?: boolean
 }) {
+  const [refreshKey, setRefreshKey] = useState(0)
   const { displayUrl, failed, loading } = useDecryptedMediaSrc(
     file.file_url,
     file.is_encrypted,
     userId,
     file.file_name,
     file.id,
+    refreshKey,
   )
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [playFailure, setPlayFailure] = useState<PlaybackFailureKind | null>(null)
@@ -93,8 +100,12 @@ function SlideVideo({
 
   useEffect(() => {
     setPlayFailure(null)
-    setRetriedPlay(false)
   }, [displayUrl])
+
+  useEffect(() => {
+    setRetriedPlay(false)
+    setRefreshKey(0)
+  }, [file.id])
 
   useEffect(() => {
     const el = videoRef.current
@@ -105,7 +116,7 @@ function SlideVideo({
   useEffect(() => {
     const el = videoRef.current
     if (!el || !displayUrl) return
-    if (isActive) {
+    if (isActive && !legacy) {
       el.loop = loop
       el.muted = false
       void el.play().catch(() => {
@@ -116,7 +127,21 @@ function SlideVideo({
       el.pause()
       el.currentTime = 0
     }
-  }, [isActive, displayUrl, loop])
+  }, [isActive, displayUrl, loop, legacy])
+
+  useEffect(() => {
+    const el = videoRef.current
+    return () => {
+      if (!el) return
+      try {
+        el.pause()
+        el.removeAttribute('src')
+        el.load()
+      } catch {
+        /* old Safari may already have released the player */
+      }
+    }
+  }, [displayUrl])
 
   if (loading || (!displayUrl && !failed)) {
     return <div className="fs-media-viewer__loading" role="status" aria-label="Loading video" />
@@ -150,12 +175,9 @@ function SlideVideo({
           const kind = classifyVideoElementError(videoRef.current)
           if (!retriedPlay && (kind === 'network' || kind === 'authorization')) {
             setRetriedPlay(true)
-            const el = videoRef.current
-            if (el && displayUrl) {
-              el.src = displayUrl
-              el.load()
-              return
-            }
+            invalidateSignedMedia(file.id)
+            setRefreshKey((value) => value + 1)
+            return
           }
           setPlayFailure(kind)
         }}
@@ -169,6 +191,7 @@ export function FullScreenMediaViewer() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
+  const legacyViewer = !browserCapabilities.supportsAdvancedViewer
 
   const sort = (location.state as { sort?: FileSort } | null)?.sort ?? 'newest'
 
@@ -281,6 +304,11 @@ export function FullScreenMediaViewer() {
       document.body.style.overflow = prev
     }
   }, [])
+
+  useEffect(() => {
+    if (!legacyViewer || !fileId) return
+    return () => releaseDecryptedBlobUrlForFile(fileId)
+  }, [fileId, legacyViewer])
 
   const goClose = useCallback(() => {
     if (albumId) navigate(`/albums/${albumId}`, { state: location.state })
@@ -416,7 +444,7 @@ export function FullScreenMediaViewer() {
   }
 
   return (
-    <div className="fs-media-viewer" style={dismissStyle}>
+    <div className={`fs-media-viewer ${legacyViewer ? 'fs-media-viewer--legacy' : ''}`} style={legacyViewer ? undefined : dismissStyle}>
       <header className="fs-media-viewer__chrome">
         <button type="button" className="fs-media-viewer__icon-btn" onClick={goClose} aria-label="Close">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -491,55 +519,74 @@ export function FullScreenMediaViewer() {
         </div>
       </header>
 
-      <div
-        ref={stageRef}
-        className="fs-media-viewer__stage"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        role="presentation"
-      >
-        <div
-          className="fs-media-viewer__track"
-          style={{
-            width: slideW > 0 ? `${displayFiles.length * slideW}px` : undefined,
-            transform: `translate3d(${trackOffset}px, 0, 0)`,
-            transition: isDragging ? 'none' : 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
-          }}
-        >
-          {displayFiles.map((f, i) => {
-            const vid = isVideo(f.file_name)
-            const nearby = Math.abs(i - index) <= 1
-            return (
-              <div key={f.id} className="fs-media-viewer__slide" style={{ width: slideW > 0 ? slideW : '100%' }}>
-                {user && nearby ? (
-                  classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'video' || vid ? (
-                    <SlideVideo
-                      file={f}
-                      userId={user.id}
-                      isActive={i === index}
-                      playbackRate={playbackRate}
-                      loop={videoLoop}
-                    />
-                  ) : classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'image' ? (
-                    <SlideImage file={f} userId={user.id} />
-                  ) : classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'pdf' ? (
-                    <iframe className="fs-media-viewer__photo" title={f.file_name} src={f.file_url.startsWith('http') ? f.file_url : undefined} />
-                  ) : (
-                    <div className="fs-media-viewer__failed">
-                      <p>{fileKindLabel(classifyFileKind({ name: f.file_name, mime_type: f.mime_type }))}</p>
-                      <p>{f.file_name}</p>
-                      <p>{formatBytes(f.file_size_bytes ?? 0)}</p>
-                      <p>Use Download in the menu. Original is stored.</p>
-                    </div>
-                  )
-                ) : null}
+      {legacyViewer ? (
+        <div className="fs-media-viewer__legacy-stage" role="presentation">
+          <div className="fs-media-viewer__legacy-media">
+            {user && (classifyFileKind({ name: currentFile.file_name, mime_type: currentFile.mime_type }) === 'video' || currentIsVideo) ? (
+              <SlideVideo file={currentFile} userId={user.id} isActive playbackRate={1} loop={false} legacy />
+            ) : user && classifyFileKind({ name: currentFile.file_name, mime_type: currentFile.mime_type }) === 'image' ? (
+              <SlideImage file={currentFile} userId={user.id} />
+            ) : (
+              <div className="fs-media-viewer__failed">
+                <p>{fileKindLabel(classifyFileKind({ name: currentFile.file_name, mime_type: currentFile.mime_type }))}</p>
+                <p>{currentFile.file_name}</p>
+                <p>{formatBytes(currentFile.file_size_bytes ?? 0)}</p>
+                <p>Use Download in the menu. Original is stored.</p>
               </div>
-            )
-          })}
+            )}
+          </div>
+          {index > 0 ? (
+            <button type="button" className="fs-media-viewer__legacy-nav fs-media-viewer__legacy-nav--prev" onClick={() => goToIndex(index - 1)} aria-label="Previous media">‹</button>
+          ) : null}
+          {index < displayFiles.length - 1 ? (
+            <button type="button" className="fs-media-viewer__legacy-nav fs-media-viewer__legacy-nav--next" onClick={() => goToIndex(index + 1)} aria-label="Next media">›</button>
+          ) : null}
         </div>
-      </div>
+      ) : (
+        <div
+          ref={stageRef}
+          className="fs-media-viewer__stage"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          role="presentation"
+        >
+          <div
+            className="fs-media-viewer__track"
+            style={{
+              width: slideW > 0 ? `${displayFiles.length * slideW}px` : undefined,
+              transform: `translate3d(${trackOffset}px, 0, 0)`,
+              transition: isDragging ? 'none' : 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+          >
+            {displayFiles.map((f, i) => {
+              const vid = isVideo(f.file_name)
+              const nearby = Math.abs(i - index) <= 1
+              return (
+                <div key={f.id} className="fs-media-viewer__slide" style={{ width: slideW > 0 ? slideW : '100%' }}>
+                  {user && nearby ? (
+                    classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'video' || vid ? (
+                      <SlideVideo file={f} userId={user.id} isActive={i === index} playbackRate={playbackRate} loop={videoLoop} />
+                    ) : classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'image' ? (
+                      <SlideImage file={f} userId={user.id} />
+                    ) : classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'pdf' ? (
+                      <iframe className="fs-media-viewer__photo" title={f.file_name} src={f.file_url.startsWith('http') ? f.file_url : undefined} />
+                    ) : (
+                      <div className="fs-media-viewer__failed">
+                        <p>{fileKindLabel(classifyFileKind({ name: f.file_name, mime_type: f.mime_type }))}</p>
+                        <p>{f.file_name}</p>
+                        <p>{formatBytes(f.file_size_bytes ?? 0)}</p>
+                        <p>Use Download in the menu. Original is stored.</p>
+                      </div>
+                    )
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="fs-media-viewer__counter" aria-hidden>
         {index + 1} / {displayFiles.length}

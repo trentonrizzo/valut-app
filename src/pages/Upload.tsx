@@ -27,6 +27,7 @@ import type { UploadMode } from '../lib/upload/uploadMode'
 import { liveToQueueItems } from '../lib/upload/queueUi'
 import { formatEta, formatSpeedBps } from '../lib/upload/strategy'
 import { filesFromInput, logUploadSelection, selectionFailureReason } from '../lib/upload/selectFiles'
+import { browserCapabilities } from '../lib/browserCapabilities'
 
 export function Upload() {
   const { user } = useAuth()
@@ -139,12 +140,12 @@ export function Upload() {
               }}
             />
           </label>
-          <fieldset className="upload-mode" aria-label="Upload speed mode">
+          {!browserCapabilities.isLegacyMode ? <fieldset className="upload-mode" aria-label="Upload speed mode">
             <legend>Upload mode</legend>
             <label><input type="radio" name="upload-mode" checked={uploadMode === 'fast'} onChange={() => { setUploadModeState('fast'); setUploadMode('fast') }} /> Fast</label>
             <label><input type="radio" name="upload-mode" checked={uploadMode === 'low-bandwidth'} onChange={() => { setUploadModeState('low-bandwidth'); setUploadMode('low-bandwidth') }} /> Low bandwidth / Offload</label>
             <p>{uploadMode === 'low-bandwidth' ? 'Reduces average upload usage by limiting simultaneous transfers and pausing between parts. An active transfer may temporarily use available bandwidth. Keep Vault open when possible; iPhone may suspend web uploads in the background and Vault will resume safely when you return.' : 'Uses normal bounded parallel uploads for the best foreground speed.'}</p>
-          </fieldset>
+          </fieldset> : null}
           <p className="upload-page__hint">Images, videos, and other files · multipart for large videos · no 200MB cap</p>
         </div>
       )}

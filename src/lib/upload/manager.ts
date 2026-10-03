@@ -45,6 +45,7 @@ import {
 import { reconcilePersistedJob, shouldSkipByteUpload } from './finalizePolicy'
 import { expectedVerifySize, storedObjectBytes } from './storedSize'
 import { inspectSelectedFile, logUploadSelection, probeSelectedFile } from './selectFiles'
+import { browserCapabilities } from '../browserCapabilities'
 
 export type LiveUploadItem = PersistedUploadJob & {
   speedBps: number
@@ -441,33 +442,36 @@ async function runJob(id: string) {
 
   try {
     if (file) {
-      try {
-        const meta = await extractMediaMetadata(file)
-        logUploadSelection('metadata', {
-          name: file.name,
-          width: meta.width,
-          height: meta.height,
-          durationMs: meta.durationMs,
-          capturedAt: meta.capturedAt,
-          mime: meta.mime,
-        })
-        job = {
-          ...job,
-          width: job.width ?? meta.width,
-          height: job.height ?? meta.height,
-          durationMs: job.durationMs ?? meta.durationMs,
-          capturedAt: job.capturedAt ?? meta.capturedAt,
-          type: normalizeUploadMime(file) || meta.mime || job.type,
-          originalFilename: job.originalFilename ?? file.name,
+      const preparationStarted = Date.now()
+      if (!browserCapabilities.isLegacyMode) {
+        try {
+          const meta = await extractMediaMetadata(file)
+          logUploadSelection('metadata', {
+            name: file.name,
+            width: meta.width,
+            height: meta.height,
+            durationMs: meta.durationMs,
+            capturedAt: meta.capturedAt,
+            mime: meta.mime,
+          })
+          job = {
+            ...job,
+            width: job.width ?? meta.width,
+            height: job.height ?? meta.height,
+            durationMs: job.durationMs ?? meta.durationMs,
+            capturedAt: job.capturedAt ?? meta.capturedAt,
+            type: normalizeUploadMime(file) || meta.mime || job.type,
+            originalFilename: job.originalFilename ?? file.name,
+          }
+          await persist(job)
+        } catch (metaErr) {
+          logUploadSelection('metadata-failed', {
+            name: file.name,
+            error: metaErr instanceof Error ? metaErr.message : String(metaErr),
+          })
         }
-        await persist(job)
-      } catch (metaErr) {
-        logUploadSelection('metadata-failed', {
-          name: file.name,
-          error: metaErr instanceof Error ? metaErr.message : String(metaErr),
-        })
       }
-      if (!job.contentHash && file.size > 0 && file.size <= 512 * 1024 * 1024) {
+      if (!browserCapabilities.isLegacyMode && !job.contentHash && file.size > 0 && file.size <= 512 * 1024 * 1024) {
         try {
           const hash = await sha256HexOfFileBestEffort(file)
           if (hash) {
@@ -478,6 +482,11 @@ async function runJob(id: string) {
           /* hashing is best-effort; never blocks upload */
         }
       }
+      logUploadSelection('preparation-timing', {
+        name: file.name,
+        size: file.size,
+        elapsedMs: Date.now() - preparationStarted,
+      })
     }
 
     let dek: CryptoKey | null = null
@@ -567,7 +576,7 @@ async function runJob(id: string) {
 
     let thumbnailKey: string | null = null
     let posterKeyVal: string | null = null
-    if (file) {
+    if (file && !browserCapabilities.isLegacyMode) {
       try {
         const thumb = isImageUpload(file) ? await makeImageThumbnail(file) : null
         const poster =
@@ -883,6 +892,7 @@ async function uploadParts(
     await persist(next)
     const gap = partGapMs(mode)
     if (gap && pending().length) await sleep(gap)
+    else if (browserCapabilities.isLegacyMode && pending().length) await sleep(0)
   }
 
   const queue = pending()

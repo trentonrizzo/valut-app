@@ -28,6 +28,7 @@ import {
   planUpload,
   uniqueOriginalKey,
 } from './strategy'
+import { humanUploadError } from './queueUi'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -69,6 +70,7 @@ describe('metadata extraction never blocks upload', () => {
     expect(manager).toContain('probeSelectedFile')
     expect(manager).toContain('ERR_EMPTY_FILE')
     expect(manager).toContain('expectedVerifySize')
+    expect(manager).toContain('!browserCapabilities.isLegacyMode')
   })
 })
 
@@ -176,6 +178,15 @@ describe('queue state restoration', () => {
       false,
     )
     expect(missing.state).toBe('needs-file')
+  })
+})
+
+describe('legacy-friendly upload errors', () => {
+  it('keeps technical transport details out of the normal queue message', () => {
+    expect(humanUploadError('ERR_NETWORK: part-put: Load failed')).toBe('Upload interrupted.')
+    expect(humanUploadError('ERR_NEEDS_FILE: browser lost the file', true)).toBe(
+      'Choose this file again to continue the upload.',
+    )
   })
 })
 

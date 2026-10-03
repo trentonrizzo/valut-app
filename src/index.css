@@ -605,12 +605,20 @@ button {
 
 .album-card__thumb-inner--media {
   position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   overflow: hidden;
 }
 
 .album-card__thumb-inner--skeleton {
   position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   background: linear-gradient(
     110deg,
@@ -624,6 +632,10 @@ button {
 
 .album-card__thumb-inner--failed {
   position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   background: rgba(255, 255, 255, 0.04);
 }
@@ -923,6 +935,10 @@ button {
 
 .modal-backdrop {
   position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
   display: flex;
@@ -1583,6 +1599,18 @@ button {
   cursor: pointer;
 }
 
+.vault-photo-tile__video-static,
+.album-card__thumb-video-wrap--static {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111;
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 1.1rem;
+}
+
 .vault-sort-select {
   height: 2.4rem;
   border-radius: var(--radius-sm);
@@ -1804,7 +1832,8 @@ button {
 
 .vault-upload-queue__footer {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 0.35rem;
   margin-top: 0.55rem;
   flex-shrink: 0;
@@ -1832,8 +1861,12 @@ button {
 }
 
 .vault-upload-queue__dismiss {
-  margin-top: 0.5rem;
-  width: 100%;
+  margin-top: 0.15rem;
+  width: auto;
+  flex: 1 1 auto;
+  min-height: 34px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.74rem;
 }
 
 .vault-action-backdrop {
@@ -1972,6 +2005,10 @@ button {
 
 .vault-photo-tile__media-fill .vault-photo-tile__media--skeleton {
   position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
 }
 
@@ -1983,6 +2020,10 @@ button {
 .vault-photo-tile__media--failed::after {
   content: '';
   position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   margin: auto;
   width: 28px;
@@ -1990,6 +2031,18 @@ button {
   opacity: 0.35;
   background: center / contain no-repeat
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='1.5'%3E%3Crect x='3' y='5' width='18' height='14' rx='2'/%3E%3Ccircle cx='8.5' cy='10.5' r='1.5' fill='%23888' stroke='none'/%3E%3Cpath d='M21 15l-5-5L5 21'/%3E%3C/svg%3E");
+}
+
+@supports not (aspect-ratio: 1 / 1) {
+  .vault-photo-tile {
+    height: calc((100vw - 4px) / var(--vault-gallery-cols, 3));
+    min-height: 88px;
+    max-height: 240px;
+  }
+
+  .album-card {
+    min-height: 220px;
+  }
 }
 
 @keyframes vault-media-shimmer {
@@ -2579,6 +2632,10 @@ button {
 /* Full-screen album media viewer (iPhone-like) */
 .fs-media-viewer {
   position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   z-index: 10000;
   background: #000;
@@ -2588,6 +2645,63 @@ button {
   min-height: -webkit-fill-available;
   touch-action: pan-y pinch-zoom;
 }
+
+.fs-media-viewer--legacy {
+  height: 100%;
+  min-height: 100%;
+  min-height: -webkit-fill-available;
+  touch-action: manipulation;
+}
+
+.fs-media-viewer__legacy-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+
+.fs-media-viewer__legacy-media {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.fs-media-viewer--legacy .fs-media-viewer__photo,
+.fs-media-viewer--legacy .fs-media-viewer__video-shell,
+.fs-media-viewer--legacy .fs-media-viewer__video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.fs-media-viewer__legacy-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  width: 44px;
+  height: 52px;
+  margin-top: -26px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.44);
+  color: #fff;
+  font-size: 2rem;
+  line-height: 1;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fs-media-viewer__legacy-nav--prev { left: 0.25rem; }
+.fs-media-viewer__legacy-nav--next { right: 0.25rem; }
 
 .fs-media-viewer--loading {
   align-items: center;

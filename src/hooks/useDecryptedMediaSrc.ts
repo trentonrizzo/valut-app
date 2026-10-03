@@ -22,6 +22,7 @@ export function useDecryptedMediaSrc(
   _userId?: string | null,
   _fileNameHint?: string,
   fileId?: string | null,
+  refreshKey = 0,
 ): VaultMediaState {
   const { session } = useAuth()
   const { masterKey } = useVault()
@@ -82,7 +83,7 @@ export function useDecryptedMediaSrc(
     return () => {
       alive = false
     }
-  }, [storedUrl, fileId, token, masterKey])
+  }, [storedUrl, fileId, token, masterKey, refreshKey])
 
   return state
 }

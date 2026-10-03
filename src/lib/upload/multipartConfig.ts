@@ -1,4 +1,5 @@
 import type { UploadMode } from './uploadMode'
+import { browserCapabilities } from '../browserCapabilities'
 
 export {
   MAX_PARTS,
@@ -14,16 +15,19 @@ export function isIosDevice(): boolean {
 }
 
 export function partConcurrency(mode: UploadMode = 'fast'): number {
+  if (browserCapabilities.isLegacyMode) return browserCapabilities.preferredPartConcurrency
   if (mode === 'low-bandwidth') return 1
   return isIosDevice() ? 2 : 4
 }
 
 export function fileConcurrency(mode: UploadMode = 'fast'): number {
+  if (browserCapabilities.isLegacyMode) return browserCapabilities.preferredUploadConcurrency
   if (mode === 'low-bandwidth') return 1
   return isIosDevice() ? 1 : 2
 }
 
 export function partGapMs(mode: UploadMode = 'fast'): number {
+  if (browserCapabilities.isLegacyMode) return 50
   return mode === 'low-bandwidth' ? 1_200 : 0
 }
 

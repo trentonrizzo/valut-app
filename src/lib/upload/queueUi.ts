@@ -39,6 +39,15 @@ function overlayStatus(state: UploadStage): UploadQueueItem['status'] {
   }
 }
 
+export function humanUploadError(error: string | null, needsFile = false): string | null {
+  if (needsFile) return 'Choose this file again to continue the upload.'
+  if (!error) return null
+  if (/network|load failed|failed to fetch|interrupted/i.test(error)) return 'Upload interrupted.'
+  if (/empty|not readable|icloud/i.test(error)) return 'This file is not available on this device. Download it from iCloud, then choose it again.'
+  const cleaned = error.replace(/^ERR_[A-Z_]+:\s*/i, '').replace(/^[a-z0-9_-]+:\s*/i, '')
+  return cleaned || 'Upload failed.'
+}
+
 export function liveToQueueItem(j: LiveLike): UploadQueueItem {
   const ui = displayProgress(j)
   return {
@@ -48,7 +57,7 @@ export function liveToQueueItem(j: LiveLike): UploadQueueItem {
     type: j.type,
     progress: ui.percent,
     status: overlayStatus(j.state),
-    error: j.error,
+    error: humanUploadError(j.error, j.state === 'needs-file'),
     speedText: ui.showEta ? formatSpeedBps(j.speedBps) : null,
     etaText: ui.showEta ? formatEta(j.etaSeconds) : null,
     stateLabel: ui.label,
@@ -56,7 +65,7 @@ export function liveToQueueItem(j: LiveLike): UploadQueueItem {
     needsFile: j.state === 'needs-file',
     canPause: j.state === 'uploading' || j.state === 'preparing' || j.state === 'encrypting' || j.state === 'finalizing',
     canResume: j.state === 'paused',
-    canRetry: j.state === 'failed' || j.state === 'needs-file',
+    canRetry: j.state === 'failed',
     bytesText: `${formatBytes(Math.min(j.uploadedBytes, j.size))} / ${formatBytes(j.size)}`,
     modeLabel: uploadModeLabel(normalizeUploadMode(j.uploadMode)),
   }

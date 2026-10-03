@@ -4,6 +4,7 @@ import { useVault } from '../../context/useVault'
 import { resolveVaultMedia } from '../../lib/media/resolveMedia'
 import { isHttpsUrl, isLegacyPublicFile, mediaFragmentUrl } from '../../lib/media/legacyUrl'
 import { isVideoFileName } from '../../lib/mediaTypes'
+import { browserCapabilities } from '../../lib/browserCapabilities'
 
 export type VaultPhotoFile = {
   id: string
@@ -94,7 +95,7 @@ export function VaultPhotoTileMedia({ file }: Props) {
   const token = session?.access_token
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const [visible, setVisible] = useState(false)
-  const legacy = isLegacyPublicFile(file)
+  const legacyPublicFile = isLegacyPublicFile(file)
   const [src, setSrc] = useState<string | null>(null)
   const [variant, setVariant] = useState<'thumb' | 'poster' | 'original'>(
     isVideo ? (file.poster_key ? 'poster' : 'original') : file.thumbnail_key ? 'thumb' : 'original',
@@ -131,7 +132,7 @@ export function VaultPhotoTileMedia({ file }: Props) {
       setFailed(false)
       return
     }
-    if (legacy && isHttpsUrl(file.file_url)) {
+    if (legacyPublicFile && isHttpsUrl(file.file_url)) {
       setSrc(file.file_url)
       setFailed(false)
       setVariant('original')
@@ -177,7 +178,7 @@ export function VaultPhotoTileMedia({ file }: Props) {
     return () => {
       alive = false
     }
-  }, [visible, file.id, file.file_url, file.poster_key, file.thumbnail_key, file.storage_key, token, masterKey, isVideo, legacy])
+  }, [visible, file.id, file.file_url, file.poster_key, file.thumbnail_key, file.storage_key, token, masterKey, isVideo, legacyPublicFile])
 
   return (
     <div ref={wrapRef} className="vault-photo-tile__media-fill">
@@ -185,6 +186,8 @@ export function VaultPhotoTileMedia({ file }: Props) {
         <div className="vault-photo-tile__media--failed" aria-label="Could not load media" />
       ) : !src ? (
         <div className="vault-photo-tile__media--skeleton" aria-hidden />
+      ) : isVideo && variant === 'original' && !browserCapabilities.shouldRenderAnimatedMediaInGrid ? (
+        <div className="vault-photo-tile__video-static" aria-label="Video">▶</div>
       ) : isVideo && variant === 'original' ? (
         <VideoTilePoster key={src} src={src} />
       ) : (

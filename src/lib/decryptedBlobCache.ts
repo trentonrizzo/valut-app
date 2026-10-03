@@ -29,3 +29,11 @@ export function setDecryptedBlobUrlForFile(fileId: string, url: string): void {
   cache.set(fileId, url)
   bump()
 }
+
+export function releaseDecryptedBlobUrlForFile(fileId: string): void {
+  const url = cache.get(fileId)
+  if (!url) return
+  cache.delete(fileId)
+  if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+  bump()
+}

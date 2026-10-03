@@ -46,4 +46,14 @@ describe('loading is not an error', () => {
     expect(src).toContain('loading')
     expect(src).toMatch(/if \(loading \|\| \(!displayUrl && !failed\)\)/)
   })
+
+  it('keeps a direct single-item viewer path for legacy Safari', () => {
+    const root = dirname(fileURLToPath(import.meta.url))
+    const src = readFileSync(join(root, '../pages/FullScreenMediaViewer.tsx'), 'utf8')
+    const css = readFileSync(join(root, '../index.css'), 'utf8')
+    expect(src).toContain('fs-media-viewer__legacy-stage')
+    expect(src).toContain('<SlideImage file={currentFile}')
+    expect(src).toContain('legacy />')
+    expect(css).toMatch(/\.fs-media-viewer\s*\{[\s\S]*?top:\s*0;[\s\S]*?left:\s*0;/)
+  })
 })
