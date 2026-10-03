@@ -1,7 +1,5 @@
-/**
- * Extract trustworthy creation/capture timestamps from MP4/MOV (ISO BMFF / QuickTime).
- * Never uses filesystem mtime. Returns ISO UTC or null.
- */
+/** Bounded MP4/MOV capture-date extraction; originals are never modified. */
+import type { CaptureDateResult } from './exifCaptureDate'
 
 const MAC_EPOCH_OFFSET_SEC = 2082844800 // 1904-01-01 → 1970-01-01
 
@@ -27,16 +25,17 @@ function macTimeToIso(macSec: number): string | null {
   return new Date(unix * 1000).toISOString()
 }
 
-function parseAsciiDate(raw: string): string | null {
+function parseAsciiDate(raw: string): CaptureDateResult | null {
   const t = raw.trim().replace(/\0/g, '')
   // QuickTime ©day often "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM:SS"
   const m = t.match(/^(\d{4})[-:](\d{2})[-:](\d{2})(?:[ T](\d{2}):(\d{2}):(\d{2}))?/)
   if (!m) return null
-  const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4] || '00'}:${m[5] || '00'}:${m[6] || '00'}`
-  const ms = Date.parse(iso)
-  if (!Number.isFinite(ms)) return null
-  if (ms < Date.parse('1985-01-01') || ms > Date.now() + 86400_000) return null
-  return new Date(ms).toISOString()
+  const local = `${m[1]}-${m[2]}-${m[3]}T${m[4] || '00'}:${m[5] || '00'}:${m[6] || '00'}`
+  const offsetMatch = t.match(/(?:Z|[+-]\d{2}:?\d{2})$/)
+  const offset = offsetMatch ? (offsetMatch[0] === 'Z' ? '+00:00' : offsetMatch[0].replace(/([+-]\d{2})(\d{2})$/, '$1:$2')) : null
+  const ms = offset ? Date.parse(`${local}${offset}`) : Number.NaN
+  if (Number.isFinite(ms) && (ms < Date.parse('1985-01-01') || ms > Date.now() + 86400_000)) return null
+  return { capturedAt: Number.isFinite(ms) ? new Date(ms).toISOString() : null, capturedLocal: local, capturedOffset: offset, source: 'quicktime_day' }
 }
 
 function scanAtoms(
@@ -44,7 +43,7 @@ function scanAtoms(
   start: number,
   end: number,
   depth: number,
-  out: { mvhd: string | null; day: string | null },
+  out: { mvhd: string | null; day: CaptureDateResult | null },
 ): void {
   if (depth > 12) return
   let offset = start
@@ -110,34 +109,43 @@ function scanAtoms(
 }
 
 /** Parse capture date from an ArrayBuffer of an MP4/MOV file (or large prefix). */
-export function extractMp4MovCaptureDateFromBuffer(buf: ArrayBuffer): string | null {
+export function extractMp4MovCaptureDateDetailsFromBuffer(buf: ArrayBuffer): CaptureDateResult | null {
   try {
     if (buf.byteLength < 16) return null
     const view = new DataView(buf)
-    const out = { mvhd: null as string | null, day: null as string | null }
+    const out = { mvhd: null as string | null, day: null as CaptureDateResult | null }
     scanAtoms(view, 0, buf.byteLength, 0, out)
     // Prefer ©day (often camera wall-clock) over mvhd when both exist
-    return out.day || out.mvhd || null
+    return out.day || (out.mvhd ? { capturedAt: out.mvhd, capturedLocal: null, capturedOffset: '+00:00', source: 'quicktime_mvhd' } : null)
   } catch {
     return null
   }
 }
 
-export async function extractVideoCaptureDate(file: Blob): Promise<string | null> {
+export async function extractVideoCaptureDateDetails(file: Blob): Promise<CaptureDateResult | null> {
   try {
     // moov may be at end (iPhone); read head + tail when large
     const headSize = Math.min(file.size, 4 * 1024 * 1024)
     const head = await file.slice(0, headSize).arrayBuffer()
-    let found = extractMp4MovCaptureDateFromBuffer(head)
+    let found = extractMp4MovCaptureDateDetailsFromBuffer(head)
     if (found) return found
     if (file.size > headSize) {
       const tailSize = Math.min(file.size, 3 * 1024 * 1024)
       const tail = await file.slice(file.size - tailSize).arrayBuffer()
-      found = extractMp4MovCaptureDateFromBuffer(tail)
+      found = extractMp4MovCaptureDateDetailsFromBuffer(tail)
       if (found) return found
     }
     return null
   } catch {
     return null
   }
+}
+
+/** Backwards-compatible exact timestamp accessor. */
+export function extractMp4MovCaptureDateFromBuffer(buf: ArrayBuffer): string | null {
+  return extractMp4MovCaptureDateDetailsFromBuffer(buf)?.capturedAt ?? null
+}
+
+export async function extractVideoCaptureDate(file: Blob): Promise<string | null> {
+  return (await extractVideoCaptureDateDetails(file))?.capturedAt ?? null
 }

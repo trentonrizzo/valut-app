@@ -3,14 +3,17 @@
  * Video poster/metadata must never block upload finalization.
  */
 import { isImageUpload, isVideoUpload, normalizeUploadMime } from './strategy'
-import { extractJpegCaptureDate } from './exifCaptureDate'
-import { extractVideoCaptureDate } from './videoCaptureDate'
+import { extractJpegCaptureDateDetails, type CaptureDateResult } from './exifCaptureDate'
+import { extractVideoCaptureDateDetails } from './videoCaptureDate'
 
 export type ExtractedMeta = {
   width: number | null
   height: number | null
   durationMs: number | null
   capturedAt: string | null
+  capturedAtLocal: string | null
+  capturedAtOffset: string | null
+  capturedAtSource: CaptureDateResult['source'] | null
   mime: string
 }
 
@@ -40,13 +43,16 @@ export async function extractMediaMetadata(file: File): Promise<ExtractedMeta> {
     height: null,
     durationMs: null,
     capturedAt: null,
+    capturedAtLocal: null,
+    capturedAtOffset: null,
+    capturedAtSource: null,
     mime,
   }
   try {
     if (isImageUpload(file)) {
       const dim = await withTimeout(imageSize(file), META_TIMEOUT_MS, { width: null, height: null })
-      const capturedAt = await withTimeout(extractJpegCaptureDate(file), META_TIMEOUT_MS, null)
-      return { ...base, ...dim, capturedAt }
+      const capture = await withTimeout(extractJpegCaptureDateDetails(file), META_TIMEOUT_MS, null)
+      return capture ? { ...base, ...dim, capturedAt: capture.capturedAt, capturedAtLocal: capture.capturedLocal, capturedAtOffset: capture.capturedOffset, capturedAtSource: capture.source } : { ...base, ...dim, ...fileModifiedFallback(file) }
     }
     if (isVideoUpload(file)) {
       const v = await withTimeout(videoMeta(file), META_TIMEOUT_MS, {
@@ -54,13 +60,21 @@ export async function extractMediaMetadata(file: File): Promise<ExtractedMeta> {
         height: null,
         durationMs: null,
       })
-      const capturedAt = await withTimeout(extractVideoCaptureDate(file), META_TIMEOUT_MS, null)
-      return { ...base, ...v, capturedAt }
+      const capture = await withTimeout(extractVideoCaptureDateDetails(file), META_TIMEOUT_MS, null)
+      return capture ? { ...base, ...v, capturedAt: capture.capturedAt, capturedAtLocal: capture.capturedLocal, capturedAtOffset: capture.capturedOffset, capturedAtSource: capture.source } : { ...base, ...v, ...fileModifiedFallback(file) }
     }
     return base
   } catch {
     return base
   }
+}
+
+export function fileModifiedFallback(file: Pick<File, 'lastModified'>): Pick<ExtractedMeta, 'capturedAt' | 'capturedAtLocal' | 'capturedAtOffset' | 'capturedAtSource'> {
+  const ms = Number(file.lastModified)
+  if (!Number.isFinite(ms) || ms <= 0 || ms > Date.now() + 86_400_000) {
+    return { capturedAt: null, capturedAtLocal: null, capturedAtOffset: null, capturedAtSource: null }
+  }
+  return { capturedAt: new Date(ms).toISOString(), capturedAtLocal: null, capturedAtOffset: null, capturedAtSource: 'file_last_modified' }
 }
 
 function imageSize(file: File): Promise<{ width: number | null; height: number | null }> {

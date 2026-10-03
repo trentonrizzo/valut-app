@@ -41,6 +41,8 @@ import { liveToQueueItems } from '../lib/upload/queueUi'
 import { formatEta } from '../lib/upload/strategy'
 import { sortGalleryFiles, type FileSort } from '../lib/gallerySort'
 import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
+import { listLinks, type VaultLink } from '../lib/links'
+import { safeOpenLink } from '../lib/linkParser'
 
 const GALLERY_COLS_KEY = 'vault-gallery-grid-cols'
 type GalleryCols = 1 | 2 | 3 | 4 | 5
@@ -130,6 +132,7 @@ export function Dashboard() {
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesError, setFilesError] = useState<string | null>(null)
   const [filesHasMore, setFilesHasMore] = useState(false)
+  const [albumLinks, setAlbumLinks] = useState<VaultLink[]>([])
 
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -568,6 +571,13 @@ export function Dashboard() {
     }
   }, [user, openAlbumId])
 
+  useEffect(() => {
+    if (!user || !openAlbumId) { setAlbumLinks([]); return }
+    void listLinks(user.id, { albumId: openAlbumId })
+      .then(setAlbumLinks)
+      .catch(() => setAlbumLinks([]))
+  }, [user, openAlbumId])
+
   async function handleCreateAlbum(name: string, parentAlbumId: string | null = null) {
     if (!user) throw new Error('Not signed in.')
 
@@ -817,11 +827,11 @@ export function Dashboard() {
                 </nav>
                 <h2 className="vault-gallery-toolbar__name">{openAlbum?.name ?? 'Album'}</h2>
                 <span className="vault-gallery-toolbar__count" aria-label="Item count">
-                  {files.length === 0
+                  {files.length + albumLinks.length === 0
                     ? 'Empty'
-                    : files.length === 1
+                    : files.length + albumLinks.length === 1
                       ? '1 item'
-                      : `${files.length} items`}
+                      : `${files.length + albumLinks.length} items`}
                   {childAlbums.length > 0 ? ` · ${childAlbums.length} nested` : ''}
                 </span>
               </div>
@@ -959,7 +969,10 @@ export function Dashboard() {
                     }
                   }}
                 />
-              </label>
+                </label>
+                <button type="button" className="btn btn--outline" onClick={() => navigate(`/links?album=${openAlbumId}`)}>
+                  Add links
+                </button>
               </div>
             </div>
 
@@ -1140,7 +1153,7 @@ export function Dashboard() {
                 </li>
               ))}
             </ul>
-            ) : files.length === 0 ? (
+            ) : files.length === 0 && albumLinks.length === 0 ? (
             <div className="vault-empty">No files in this album yet.</div>
             ) : (
             <>
@@ -1238,6 +1251,19 @@ export function Dashboard() {
                 )
               })}
             </ul>
+            {albumLinks.length ? (
+              <ul className="vault-grid vault-grid--gallery links-album-grid" style={{ ['--vault-gallery-cols' as string]: String(galleryCols) } as CSSProperties}>
+                {albumLinks.map((link) => (
+                  <li key={`link-${link.id}`} className="vault-photo-item">
+                    <button type="button" className="vault-photo-tile link-gallery-tile" onClick={() => { if (!safeOpenLink(link.url)) showToast('Only safe http/https links can be opened.', 'error') }}>
+                      <span className="link-gallery-tile__icon" aria-hidden>↗</span>
+                      <strong>{link.title || link.domain || 'Link'}</strong>
+                      <small>{link.domain}</small>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             {filesHasMore ? (
               <div className="library-more">
                 <button

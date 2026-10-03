@@ -12,6 +12,7 @@ export interface Database {
       vault_links: TableShape<import('../lib/links').VaultLink, 'user_id' | 'url'>
       album_links: TableShape<{ album_id: string; link_id: string; user_id: string; created_at: string }, 'album_id' | 'link_id' | 'user_id'>
       link_files: TableShape<{ link_id: string; file_id: string; user_id: string; created_at: string }, 'link_id' | 'file_id' | 'user_id'>
+      link_tags: TableShape<{ link_id: string; tag_id: string; user_id: string; created_at: string }, 'link_id' | 'tag_id' | 'user_id'>
 
       profiles: {
         Row: {
@@ -101,6 +102,9 @@ export interface Database {
           height: number | null
           duration_ms: number | null
           captured_at: string | null
+          captured_at_local: string | null
+          captured_at_offset: string | null
+          captured_at_source: string | null
           favorite: boolean
           rating: number | null
           thumbnail_key: string | null
@@ -140,6 +144,9 @@ export interface Database {
           height?: number | null
           duration_ms?: number | null
           captured_at?: string | null
+          captured_at_local?: string | null
+          captured_at_offset?: string | null
+          captured_at_source?: string | null
           favorite?: boolean
           rating?: number | null
           thumbnail_key?: string | null
@@ -179,6 +186,9 @@ export interface Database {
           height?: number | null
           duration_ms?: number | null
           captured_at?: string | null
+          captured_at_local?: string | null
+          captured_at_offset?: string | null
+          captured_at_source?: string | null
           favorite?: boolean
           rating?: number | null
           thumbnail_key?: string | null

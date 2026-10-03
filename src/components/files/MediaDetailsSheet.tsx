@@ -21,6 +21,15 @@ function fmtDate(iso: string | null | undefined): string {
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+function fmtCaptured(file: FileRow): string {
+  if (file.captured_at) return fmtDate(file.captured_at)
+  if (file.captured_at_local) {
+    const display = file.captured_at_local.replace('T', ' ')
+    return `${display}${file.captured_at_offset ? ` ${file.captured_at_offset}` : ' (timezone unknown)'}`
+  }
+  return 'Unknown'
+}
+
 function fmtDuration(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return '—'
   const s = Math.round(ms / 1000)
@@ -66,8 +75,8 @@ export function MediaDetailsSheet({ file, onClose, onChanged }: Props) {
       value: String((file as FileRow & { original_filename?: string | null }).original_filename || file.file_name),
     },
     { label: 'Type', value: file.mime_type || 'Unknown' },
-    { label: 'Original creation', value: fmtDate(file.captured_at) },
-    { label: 'Vault import', value: fmtDate(file.created_at) },
+    { label: 'Created', value: fmtCaptured(file) },
+    { label: 'Uploaded', value: fmtDate(file.created_at) },
     { label: 'Size', value: file.file_size_bytes != null ? formatBytes(file.file_size_bytes) : 'Unknown' },
     { label: 'Duration', value: fmtDuration(file.duration_ms) },
     {

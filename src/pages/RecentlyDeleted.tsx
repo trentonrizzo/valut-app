@@ -5,6 +5,7 @@ import { emptyRecentlyDeleted, listDeletedFiles, permanentDeleteFiles, restoreFi
 import { classifyFileKind, fileKindLabel } from '../lib/fileKind'
 import type { FileRow } from '../types/media'
 import { formatBytes } from '../lib/formatBytes'
+import { listLinks, permanentlyDeleteLinks, restoreLinks, type VaultLink } from '../lib/links'
 
 export function RecentlyDeleted() {
   const { user, session } = useAuth()
@@ -13,12 +14,15 @@ export function RecentlyDeleted() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
+  const [links, setLinks] = useState<VaultLink[]>([])
+  const [selectedLinks, setSelectedLinks] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     if (!user) return
     setLoading(true)
     try {
       setRows(await listDeletedFiles(user.id))
+      setLinks(await listLinks(user.id, { includeDeleted: true }))
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Could not load Recently Deleted', 'error')
     } finally {
@@ -66,12 +70,13 @@ export function RecentlyDeleted() {
 
   async function emptyAll() {
     const token = session?.access_token
-    if (!token || rows.length === 0) return
-    if (!window.confirm(`Empty Recently Deleted (${rows.length} items)? This permanently deletes originals.`)) return
+    if (!token || rows.length + links.length === 0 || !user) return
+    if (!window.confirm(`Empty Recently Deleted (${rows.length + links.length} items)? This permanently deletes originals and saved links.`)) return
     if (!window.confirm('Type-level confirm: permanently delete everything in trash?')) return
     setBusy(true)
     try {
       await emptyRecentlyDeleted(token)
+      await permanentlyDeleteLinks(user.id, links.map((link) => link.id))
       showToast('Recently Deleted emptied')
       setSelected(new Set())
       await load()
@@ -81,6 +86,21 @@ export function RecentlyDeleted() {
     } finally {
       setBusy(false)
     }
+  }
+
+  async function restoreSelectedLinks() {
+    if (!user || selectedLinks.size === 0) return
+    await restoreLinks(user.id, [...selectedLinks])
+    setSelectedLinks(new Set())
+    await load()
+  }
+
+  async function destroySelectedLinks() {
+    if (!user || selectedLinks.size === 0) return
+    if (!window.confirm('Permanently delete selected saved links?')) return
+    await permanentlyDeleteLinks(user.id, [...selectedLinks])
+    setSelectedLinks(new Set())
+    await load()
   }
 
   return (
@@ -104,13 +124,20 @@ export function RecentlyDeleted() {
           </div>
         ) : null}
         <div className="filter-bar">
-          <button type="button" className="btn btn--outline" disabled={busy || rows.length === 0} onClick={() => void emptyAll()}>
+          <button type="button" className="btn btn--outline" disabled={busy || rows.length + links.length === 0} onClick={() => void emptyAll()}>
             Empty Recently Deleted
           </button>
         </div>
+        {selectedLinks.size > 0 ? (
+          <div className="bulk-bar">
+            <span className="bulk-bar__count">{selectedLinks.size} link(s) selected</span>
+            <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => void restoreSelectedLinks()}>Restore links</button>
+            <button type="button" className="btn btn--danger" disabled={busy} onClick={() => void destroySelectedLinks()}>Delete links permanently</button>
+          </div>
+        ) : null}
         {loading ? (
           <div className="vault-loading">Loading…</div>
-        ) : rows.length === 0 ? (
+        ) : rows.length === 0 && links.length === 0 ? (
           <div className="vault-empty">Nothing in Recently Deleted.</div>
         ) : (
           <ul className="deleted-list">
@@ -140,6 +167,20 @@ export function RecentlyDeleted() {
             })}
           </ul>
         )}
+        {links.length ? (
+          <ul className="deleted-list">
+            {links.map((link) => (
+              <li key={`link-${link.id}`} className={`deleted-row ${selectedLinks.has(link.id) ? 'is-selected' : ''}`}>
+                <label>
+                  <input type="checkbox" checked={selectedLinks.has(link.id)} onChange={() => { const next = new Set(selectedLinks); if (next.has(link.id)) next.delete(link.id); else next.add(link.id); setSelectedLinks(next) }} />
+                  <span className="deleted-row__kind">Link</span>
+                  <span className="deleted-row__name">{link.title || link.domain || 'Saved link'}</span>
+                  <span className="deleted-row__meta">{link.deleted_at ? new Date(link.deleted_at).toLocaleString() : ''}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </main>
     </div>
   )

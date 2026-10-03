@@ -219,6 +219,9 @@ export function Library() {
               }}
             />
           </label>
+          <button type="button" className="btn btn--outline" onClick={() => navigate('/links')}>
+            Add Links
+          </button>
         </div>
         <FilterBar filters={filters} onChange={setFilters} tags={tags} albums={albums} />
         <BulkActionBar

@@ -140,12 +140,15 @@ export function FilterBar({ filters, onChange, tags, albums = [] }: Props) {
             ['all', 'All'],
             ['photos', 'Photos'],
             ['videos', 'Videos'],
+            ['links', 'Links'],
             ['favorites', 'Favorites'],
             ['tags', 'Tags'],
             ['albums', 'Albums'],
             ['more', count > 0 ? `More (${count})` : 'More'],
           ] as const
-        ).map(([id, label]) => (
+        ).map(([id, label]) => id === 'links' ? (
+          <a key={id} className="filter-quick__chip" href="/links">{label}</a>
+        ) : (
           <button
             key={id}
             type="button"

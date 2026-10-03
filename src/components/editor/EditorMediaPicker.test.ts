@@ -42,7 +42,7 @@ function row(id: string, name: string): FileRow {
     id, user_id: 'user-1', album_id: null, file_name: name, file_url: `r2://${id}`, created_at: '2026-01-01T00:00:00Z',
     file_size_bytes: 1, purpose: 'content', is_encrypted: false, mime_type: 'image/jpeg', storage_key: id,
     storage_provider: 'r2', upload_status: 'ready', checksum: null, width: 1, height: 1, duration_ms: null,
-    captured_at: null, favorite: false, rating: null, thumbnail_key: null, poster_key: null, encryption_version: 0,
+    captured_at: null, captured_at_local: null, captured_at_offset: null, captured_at_source: null, favorite: false, rating: null, thumbnail_key: null, poster_key: null, encryption_version: 0,
     wrapped_dek: null, encryption_chunk_size: null, metadata_json: {}, deleted_at: null, locked: false,
     stored_size_bytes: 1, storage_integrity: 'ready', membership_snapshot: null, original_filename: name,
     source_url: null, description: null, content_hash: null, hash_algo: null, hash_status: null,

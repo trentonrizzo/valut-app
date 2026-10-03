@@ -5,8 +5,8 @@
 import { supabase } from './supabase'
 import { apiSignedGet } from './upload/storageApi'
 import { sha256HexOfFile } from './upload/contentHash'
-import { extractJpegCaptureDate } from './upload/exifCaptureDate'
-import { extractVideoCaptureDate } from './upload/videoCaptureDate'
+import { extractJpegCaptureDateDetails } from './upload/exifCaptureDate'
+import { extractVideoCaptureDateDetails } from './upload/videoCaptureDate'
 import { resolveVaultMedia } from './media/resolveMedia'
 import type { FileRow } from '../types/media'
 
@@ -30,6 +30,40 @@ export type CaptureBatchResult = {
   nextCursorCreatedAt: string | null
   nextCursorId: string | null
   messages: string[]
+}
+
+const MAX_ENCRYPTED_CAPTURE_SCAN_BYTES = 64 * 1024 * 1024
+const JPEG_SCAN_BYTES = 256 * 1024
+const VIDEO_HEAD_BYTES = 4 * 1024 * 1024
+const VIDEO_TAIL_BYTES = 3 * 1024 * 1024
+
+async function fetchBoundedRange(url: string, start: number, end: number): Promise<Blob> {
+  const response = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } })
+  if (!response.ok) throw new Error(`range fetch ${response.status}`)
+  const declared = Number(response.headers.get('content-length') || 0)
+  const expected = Math.max(0, end - start + 1)
+  if (declared > expected + 1024) throw new Error('storage ignored bounded range request')
+  const blob = await response.blob()
+  if (blob.size > expected + 1024) throw new Error('storage returned an unbounded range')
+  return blob
+}
+
+async function captureScanBlob(
+  accessToken: string,
+  file: FileRow,
+  masterKey: CryptoKey | null,
+  isImage: boolean,
+): Promise<Blob> {
+  if (file.is_encrypted) return blobFromResolved(accessToken, file, masterKey)
+  const signed = await apiSignedGet(accessToken, file.id, 'original')
+  const total = Math.max(0, file.file_size_bytes ?? 0)
+  if (isImage) return fetchBoundedRange(signed.url, 0, Math.max(0, Math.min(total || JPEG_SCAN_BYTES, JPEG_SCAN_BYTES) - 1))
+  const headEnd = Math.max(0, Math.min(total || VIDEO_HEAD_BYTES, VIDEO_HEAD_BYTES) - 1)
+  const head = await fetchBoundedRange(signed.url, 0, headEnd)
+  if (total <= VIDEO_HEAD_BYTES) return head
+  const tailStart = Math.max(VIDEO_HEAD_BYTES, total - VIDEO_TAIL_BYTES)
+  const tail = await fetchBoundedRange(signed.url, tailStart, total - 1)
+  return new Blob([head, tail], { type: file.mime_type || 'application/octet-stream' })
 }
 
 const MAX_HASH_BYTES = 180 * 1024 * 1024
@@ -176,11 +210,12 @@ export async function backfillCaptureDatesBatch(opts: {
   const limit = opts.limit ?? 3
   let q = supabase
     .from('files')
-    .select('id, file_url, is_encrypted, mime_type, file_name, file_size_bytes, captured_at, created_at')
+    .select('id, file_url, is_encrypted, mime_type, file_name, file_size_bytes, captured_at, captured_at_source, created_at')
     .eq('user_id', opts.userId)
     .eq('purpose', 'content')
     .is('deleted_at', null)
     .is('captured_at', null)
+    .is('captured_at_source', null)
     .order('created_at', { ascending: true })
     .order('id', { ascending: true })
     .limit(limit)
@@ -206,28 +241,32 @@ export async function backfillCaptureDatesBatch(opts: {
         skipped += 1
         continue
       }
-      // Cap download for capture-date scan
-      if ((row.file_size_bytes ?? 0) > 400 * 1024 * 1024) {
+      // Encrypted legacy resolution currently decrypts a whole object. Keep that path
+      // explicitly bounded; large encrypted originals remain untouched/unknown.
+      if (row.is_encrypted && (row.file_size_bytes ?? 0) > MAX_ENCRYPTED_CAPTURE_SCAN_BYTES) {
         skipped += 1
         continue
       }
-      const blob = await blobFromResolved(opts.accessToken, row, opts.masterKey)
-      let captured: string | null = null
-      if (isImage) {
-        captured = await extractJpegCaptureDate(new File([blob], row.file_name || 'image.jpg', { type: mime || 'image/jpeg' }))
-      } else {
-        captured = await extractVideoCaptureDate(blob)
-      }
-      if (!captured) {
+      const blob = await captureScanBlob(opts.accessToken, row, opts.masterKey, isImage)
+      const capture = isImage
+        ? await extractJpegCaptureDateDetails(blob)
+        : await extractVideoCaptureDateDetails(blob)
+      if (!capture) {
         skipped += 1
         continue
       }
       const { error: upErr } = await supabase
         .from('files')
-        .update({ captured_at: captured })
+        .update({
+          captured_at: capture.capturedAt,
+          captured_at_local: capture.capturedLocal,
+          captured_at_offset: capture.capturedOffset,
+          captured_at_source: capture.source,
+        })
         .eq('id', row.id)
         .eq('user_id', opts.userId)
         .is('captured_at', null)
+        .is('captured_at_source', null)
       if (upErr) throw new Error(upErr.message)
       updated += 1
     } catch (e) {

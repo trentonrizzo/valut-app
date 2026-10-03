@@ -76,4 +76,22 @@ describe('data-safety source contracts', () => {
     expect(app).toContain('ErrorBoundary')
     expect(app).toContain('BootScreen')
   })
+
+  it('capture-date/link migration is additive and never rewrites media or link rows', () => {
+    const src = readFileSync(join(root, 'supabase/migrations/20261002223000_capture_dates_and_link_lifecycle.sql'), 'utf8')
+    const uncommented = src.replace(/--.*$/gm, '').toLowerCase()
+    expect(uncommented).not.toMatch(/drop table\s/)
+    expect(uncommented).not.toMatch(/\btruncate\b/)
+    expect(uncommented).not.toMatch(/delete\s+from/)
+    expect(uncommented).not.toMatch(/update\s+public\.(files|vault_links)/)
+    expect(src).toContain('captured_at_source')
+    expect(src).toContain('add column if not exists deleted_at')
+  })
+
+  it('saved links never invoke R2 or external preview services', () => {
+    const src = readFileSync(join(root, 'src/lib/links.ts'), 'utf8')
+    expect(src).not.toContain('DeleteObject')
+    expect(src).not.toContain('R2_')
+    expect(src).not.toMatch(/fetch\s*\(/)
+  })
 })

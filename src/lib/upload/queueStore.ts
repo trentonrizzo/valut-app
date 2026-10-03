@@ -41,6 +41,9 @@ export type PersistedUploadJob = {
   height: number | null
   durationMs: number | null
   capturedAt: string | null
+  capturedAtLocal?: string | null
+  capturedAtOffset?: string | null
+  capturedAtSource?: import('./exifCaptureDate').CaptureDateSource | null
   contentHash?: string | null
   hashAlgo?: string | null
   originalFilename?: string | null

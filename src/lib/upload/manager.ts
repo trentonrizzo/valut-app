@@ -26,7 +26,7 @@ import {
 import { deleteJob, listJobs, saveJob, type PersistedUploadJob, type UploadUiState } from './queueStore'
 import { fileConcurrency, isIosDevice, partConcurrency, partGapMs, putWithRetry, sleep } from './multipartConfig'
 import { getPreferredUploadMode, normalizeUploadMode, setPreferredUploadMode, type UploadMode } from './uploadMode'
-import { extractMediaMetadata, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
+import { extractMediaMetadata, fileModifiedFallback, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
 import { sha256HexOfFileBestEffort } from './contentHash'
 import {
   canCatalogReady,
@@ -249,7 +249,15 @@ export async function enqueueFiles(files: File[], opts: { albumId: string | null
       width: null,
       height: null,
       durationMs: null,
-      capturedAt: null,
+      ...(() => {
+        const fallback = fileModifiedFallback(file)
+        return {
+          capturedAt: fallback.capturedAt,
+          capturedAtLocal: fallback.capturedAtLocal,
+          capturedAtOffset: fallback.capturedAtOffset,
+          capturedAtSource: fallback.capturedAtSource,
+        }
+      })(),
       createdAt: Date.now(),
       r2Complete: false,
       r2Verified: false,
@@ -459,7 +467,10 @@ async function runJob(id: string) {
             width: job.width ?? meta.width,
             height: job.height ?? meta.height,
             durationMs: job.durationMs ?? meta.durationMs,
-            capturedAt: job.capturedAt ?? meta.capturedAt,
+            capturedAt: meta.capturedAtSource ? meta.capturedAt : job.capturedAt,
+            capturedAtLocal: meta.capturedAtSource ? meta.capturedAtLocal : job.capturedAtLocal,
+            capturedAtOffset: meta.capturedAtSource ? meta.capturedAtOffset : job.capturedAtOffset,
+            capturedAtSource: meta.capturedAtSource ?? job.capturedAtSource,
             type: normalizeUploadMime(file) || meta.mime || job.type,
             originalFilename: job.originalFilename ?? file.name,
           }
@@ -664,6 +675,9 @@ async function finalizeCatalog(
     height: job.height,
     duration_ms: job.durationMs,
     captured_at: job.capturedAt,
+    captured_at_local: job.capturedAtLocal ?? null,
+    captured_at_offset: job.capturedAtOffset ?? null,
+    captured_at_source: job.capturedAtSource ?? null,
     favorite: false,
     thumbnail_key: extras.thumbnailKey,
     poster_key: extras.posterKeyVal,
@@ -672,6 +686,7 @@ async function finalizeCatalog(
     encryption_chunk_size: job.encryptionVersion > 0 ? job.chunkSize || CHUNK_PLAINTEXT_BYTES : null,
     metadata_json: {
       fileNonce: job.fileNonceB64,
+      captureDateSource: job.capturedAtSource ?? null,
     },
     original_filename: job.originalFilename ?? job.fileName,
     checksum: job.contentHash ?? null,
@@ -682,7 +697,7 @@ async function finalizeCatalog(
 
   const { error: insErr } = await supabase.from('files').upsert(insert, { onConflict: 'id', ignoreDuplicates: true })
   if (insErr) {
-    if (/content_hash|original_filename|hash_algo|hash_status/i.test(insErr.message)) {
+    if (/content_hash|original_filename|hash_algo|hash_status|captured_at_local|captured_at_offset|captured_at_source/i.test(insErr.message)) {
       const legacy = {
         id: insert.id,
         user_id: insert.user_id,
