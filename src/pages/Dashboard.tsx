@@ -41,9 +41,16 @@ import {
 import { liveToQueueItems } from '../lib/upload/queueUi'
 import { formatEta } from '../lib/upload/strategy'
 import { sortGalleryFiles, type FileSort } from '../lib/gallerySort'
-import { useDecryptedMediaSrc } from '../hooks/useDecryptedMediaSrc'
 import { listLinks, type VaultLink } from '../lib/links'
 import { safeOpenLink } from '../lib/linkParser'
+import { useVault } from '../context/useVault'
+import {
+  downloadOriginalFile,
+  prepareOriginalForSharing,
+  sharePreparedOriginal,
+  supportsFileSharing,
+} from '../lib/media/originalExport'
+import { classifyFileKind } from '../lib/fileKind'
 
 const GALLERY_COLS_KEY = 'vault-gallery-grid-cols'
 type GalleryCols = 1 | 2 | 3 | 4 | 5
@@ -79,7 +86,8 @@ function GridColsIcon({ cols }: { cols: number }) {
 }
 
 export function Dashboard() {
-  const { user } = useAuth()
+  const { user, session } = useAuth()
+  const { masterKey } = useVault()
   const { showToast } = useToast()
   const { albumId: albumIdParam, fileId: mediaFileId } = useParams<{ albumId?: string; fileId?: string }>()
   const navigate = useNavigate()
@@ -158,19 +166,49 @@ export function Dashboard() {
   }, [uploadLiveTick])
   const liveTotals = batchTotals(getLiveUploads())
   const liveCurrent = getLiveUploads().find((j) =>
-    ['uploading', 'preparing', 'encrypting', 'finalizing', 'retrying'].includes(j.state),
+    ['uploading', 'preparing', 'extracting', 'encrypting', 'finalizing', 'verifying', 'retrying'].includes(j.state),
   )
 
   const [fileActionTarget, setFileActionTarget] = useState<FileRow | null>(null)
+  const [fileExportBusy, setFileExportBusy] = useState(false)
+  const [preparedActionShare, setPreparedActionShare] = useState<File | null>(null)
   const [fileInfoTarget, setFileInfoTarget] = useState<MediaFileRow | null>(null)
 
-  const fileActionMedia = useDecryptedMediaSrc(
-    fileActionTarget?.file_url ?? null,
-    fileActionTarget?.is_encrypted,
-    user?.id ?? null,
-    fileActionTarget?.file_name ?? '',
-    fileActionTarget?.id,
-  )
+  const exportActionFile = async (mode: 'photos' | 'download') => {
+    if (!fileActionTarget || !session?.access_token || fileExportBusy) return
+    setFileExportBusy(true)
+    try {
+      const options = {
+        file: fileActionTarget,
+        accessToken: session.access_token,
+        masterKey,
+      }
+      if (mode === 'photos') {
+        if (preparedActionShare) {
+          await sharePreparedOriginal(preparedActionShare)
+          showToast('Share sheet opened — choose Save Image or Save Video.')
+          setPreparedActionShare(null)
+          setFileActionTarget(null)
+        } else {
+          setPreparedActionShare(await prepareOriginalForSharing(options))
+          showToast('Ready to save. Tap Open share sheet.')
+        }
+      } else {
+        await downloadOriginalFile(options)
+        showToast('Download started. On iPhone, check Files → Downloads.')
+        setFileActionTarget(null)
+      }
+    } catch (e) {
+      if (!(e instanceof DOMException && e.name === 'AbortError')) {
+        showToast(e instanceof Error ? e.message : 'Download failed — retry.', 'error')
+      }
+    } finally {
+      setFileExportBusy(false)
+    }
+  }
+  useEffect(() => {
+    setPreparedActionShare(null)
+  }, [fileActionTarget?.id])
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressTouchStartRef = useRef<{ x: number; y: number } | null>(null)
 
@@ -859,6 +897,8 @@ export function Dashboard() {
                 >
                   <option value="newest">Newest</option>
                   <option value="oldest">Oldest</option>
+                  <option value="newest_captured">Newest original</option>
+                  <option value="oldest_captured">Oldest original</option>
                   <option value="largest">Largest</option>
                   <option value="smallest">Smallest</option>
                   <option value="images_first">Images first</option>
@@ -1315,21 +1355,24 @@ export function Dashboard() {
                     {fileActionTarget.file_name}
                   </h2>
                   <div className="vault-action-sheet__list">
-                    <a
+                    {supportsFileSharing() && ['image', 'video'].includes(classifyFileKind({ name: fileActionTarget.file_name, mime_type: fileActionTarget.mime_type })) ? (
+                      <button
+                        type="button"
+                        className="vault-action-sheet__item"
+                        disabled={fileExportBusy}
+                        onClick={() => void exportActionFile('photos')}
+                      >
+                        {preparedActionShare ? 'Open share sheet' : 'Save to Photos'}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
                       className="vault-action-sheet__item"
-                      href={fileActionMedia.downloadUrl ?? '#'}
-                      download={fileActionTarget.file_name}
-                      aria-disabled={!fileActionMedia.downloadUrl}
-                      onClick={(e) => {
-                        if (!fileActionMedia.downloadUrl) {
-                          e.preventDefault()
-                          return
-                        }
-                        setFileActionTarget(null)
-                      }}
+                      disabled={fileExportBusy}
+                      onClick={() => void exportActionFile('download')}
                     >
-                      Download
-                    </a>
+                      Download File
+                    </button>
                     <button
                       type="button"
                       className="vault-action-sheet__item"

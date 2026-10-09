@@ -24,6 +24,7 @@ function fmtDate(iso: string | null | undefined): string {
 }
 
 function fmtCaptured(file: FileRow): string {
+  if (file.captured_at_source === 'file_last_modified') return 'Unknown'
   if (file.captured_at) return fmtDate(file.captured_at)
   if (file.captured_at_local) {
     const display = file.captured_at_local.replace('T', ' ')
@@ -128,8 +129,17 @@ export function MediaDetailsSheet({ file, onClose, onChanged }: Props) {
       label: 'Original filename',
       value: String((file as FileRow & { original_filename?: string | null }).original_filename || file.file_name),
     },
-    { label: 'Created', value: fmtCaptured(file) },
-    { label: 'Uploaded', value: fmtDate(file.created_at) },
+    { label: 'Original creation', value: fmtCaptured(file) },
+    { label: 'Uploaded to Vault', value: fmtDate(file.created_at) },
+    ...(file.captured_at_source && file.captured_at_source !== 'file_last_modified'
+      ? [{ label: 'Creation date source', value: file.captured_at_source.replace(/_/g, ' ') }]
+      : []),
+    ...(() => {
+      const stored = file.metadata_json?.filesystemModifiedAt
+      const fallback = file.captured_at_source === 'file_last_modified' ? file.captured_at : null
+      const value = typeof stored === 'string' ? stored : fallback
+      return value ? [{ label: 'File modified', value: fmtDate(value) }] : []
+    })(),
     ...(video ? [
       { label: 'Duration', value: fmtDuration(durationMs) },
       { label: 'Resolution', value: width && height ? `${width} × ${height}` : 'Unknown' },

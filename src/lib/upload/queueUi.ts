@@ -27,9 +27,11 @@ function overlayStatus(state: UploadStage): UploadQueueItem['status'] {
     case 'paused':
       return 'queued'
     case 'preparing':
+    case 'extracting':
     case 'encrypting':
       return 'preparing'
     case 'finalizing':
+    case 'verifying':
       return 'finalizing'
     case 'retrying':
       return 'retrying'
@@ -63,7 +65,7 @@ export function liveToQueueItem(j: LiveLike): UploadQueueItem {
     stateLabel: ui.label,
     uploadedBytes: j.uploadedBytes,
     needsFile: j.state === 'needs-file',
-    canPause: j.state === 'uploading' || j.state === 'preparing' || j.state === 'encrypting' || j.state === 'finalizing',
+    canPause: j.state === 'uploading' || j.state === 'preparing' || j.state === 'extracting' || j.state === 'encrypting' || j.state === 'finalizing' || j.state === 'verifying',
     canResume: j.state === 'paused',
     canRetry: j.state === 'failed',
     bytesText: `${formatBytes(Math.min(j.uploadedBytes, j.size))} / ${formatBytes(j.size)}`,

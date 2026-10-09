@@ -110,8 +110,13 @@ export async function apiRecordOrphan(
   )
 }
 
-export async function apiSignedGet(accessToken: string, fileId: string, variant: 'original' | 'thumb' | 'poster' = 'original') {
-  const res = await fetch(`/api/storage/signed-get?fileId=${encodeURIComponent(fileId)}&variant=${variant}`, {
+export async function apiSignedGet(
+  accessToken: string,
+  fileId: string,
+  variant: 'original' | 'thumb' | 'poster' = 'original',
+  disposition: 'inline' | 'attachment' = 'inline',
+) {
+  const res = await fetch(`/api/storage/signed-get?fileId=${encodeURIComponent(fileId)}&variant=${variant}&disposition=${disposition}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   return parse<{

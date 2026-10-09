@@ -123,10 +123,10 @@ export async function extractBoundedMediaMetadata(file: File): Promise<{
           capturedAtSource: embedded.source,
         }, technicalMetadata }
     }
-    return { capture: fileModifiedFallback(file), technicalMetadata }
+    return { capture: none, technicalMetadata }
   } catch {
     return {
-      capture: isImageUpload(file) || isVideoUpload(file) ? fileModifiedFallback(file) : none,
+      capture: none,
       technicalMetadata: null,
     }
   }

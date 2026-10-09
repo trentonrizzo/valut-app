@@ -1,11 +1,13 @@
 export type UploadUiState =
   | 'queued'
   | 'preparing'
+  | 'extracting'
   | 'encrypting'
   | 'uploading'
   | 'paused'
   | 'retrying'
   | 'finalizing'
+  | 'verifying'
   | 'complete'
   | 'failed'
   | 'needs-file'
@@ -58,6 +60,8 @@ export type PersistedUploadJob = {
   errorCode?: string | null
   lastStage?: string | null
   lastModified?: number
+  /** Filesystem timestamp supplied by the picker. It is never treated as camera capture time. */
+  filesystemModifiedAt?: string | null
   /** Added without rewriting old jobs. Missing means the original fast behavior. */
   uploadMode?: import('./uploadMode').UploadMode
 }

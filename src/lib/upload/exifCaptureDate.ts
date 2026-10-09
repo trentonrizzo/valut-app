@@ -31,11 +31,13 @@ function normalizeOffset(raw: string | null): string | null {
 function parseExifDate(
   raw: string,
   offset: string | null,
+  subSeconds: string | null,
   source: Extract<CaptureDateSource, 'exif_datetime_original' | 'exif_create_date'>,
 ): CaptureDateResult | null {
   const m = raw.trim().match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/)
   if (!m) return null
-  const local = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}`
+  const fraction = subSeconds?.trim().match(/^\d{1,9}/)?.[0]
+  const local = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${fraction ? `.${fraction}` : ''}`
   const normalizedOffset = normalizeOffset(offset)
   const parsed = normalizedOffset ? Date.parse(`${local}${normalizedOffset}`) : Number.NaN
   return {
@@ -55,9 +57,23 @@ function readExifAscii(view: DataView, offset: number, count: number): string {
   }
   return out
 }
-type ExifFields = { original: string | null; digitized: string | null; offsetOriginal: string | null; offsetDigitized: string | null }
+type ExifFields = {
+  original: string | null
+  digitized: string | null
+  offsetOriginal: string | null
+  offsetDigitized: string | null
+  subsecOriginal: string | null
+  subsecDigitized: string | null
+}
 function scanIfd(view: DataView, tiffStart: number, ifdOffset: number, le: boolean): ExifFields {
-  const out: ExifFields = { original: null, digitized: null, offsetOriginal: null, offsetDigitized: null }
+  const out: ExifFields = {
+    original: null,
+    digitized: null,
+    offsetOriginal: null,
+    offsetDigitized: null,
+    subsecOriginal: null,
+    subsecDigitized: null,
+  }
   if (ifdOffset <= 0 || tiffStart + ifdOffset + 2 > view.byteLength) return out
   const count = readU16(view, tiffStart + ifdOffset, le)
   for (let i = 0; i < count; i += 1) {
@@ -76,6 +92,8 @@ function scanIfd(view: DataView, tiffStart: number, ifdOffset: number, le: boole
     if (tag === 0x9004) out.digitized = text
     if (tag === 0x9011) out.offsetOriginal = text
     if (tag === 0x9012) out.offsetDigitized = text
+    if (tag === 0x9291) out.subsecOriginal = text
+    if (tag === 0x9292) out.subsecDigitized = text
   }
   return out
 }
@@ -102,10 +120,20 @@ function extractTiffCaptureDate(view: DataView, tiffStart: number): CaptureDateR
   }
   const exif = exifPtr != null ? scanIfd(view, tiffStart, exifPtr, le) : first
   if (exif.original || first.original) {
-    return parseExifDate(exif.original || first.original || '', exif.offsetOriginal || first.offsetOriginal, 'exif_datetime_original')
+    return parseExifDate(
+      exif.original || first.original || '',
+      exif.offsetOriginal || first.offsetOriginal,
+      exif.subsecOriginal || first.subsecOriginal,
+      'exif_datetime_original',
+    )
   }
   if (exif.digitized || first.digitized) {
-    return parseExifDate(exif.digitized || first.digitized || '', exif.offsetDigitized || first.offsetDigitized, 'exif_create_date')
+    return parseExifDate(
+      exif.digitized || first.digitized || '',
+      exif.offsetDigitized || first.offsetDigitized,
+      exif.subsecDigitized || first.subsecDigitized,
+      'exif_create_date',
+    )
   }
   return null
 }

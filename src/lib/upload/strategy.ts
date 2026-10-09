@@ -11,9 +11,11 @@ export const MAX_QUEUE_ITEMS = Number.POSITIVE_INFINITY
 export type UploadStage =
   | 'queued'
   | 'preparing'
+  | 'extracting'
   | 'encrypting'
   | 'uploading'
   | 'finalizing'
+  | 'verifying'
   | 'complete'
   | 'paused'
   | 'retrying'
@@ -207,7 +209,11 @@ export function displayProgress(job: {
     case 'complete':
       return { percent: 100, label: 'Complete', showEta: false, complete: true }
     case 'finalizing':
+      return { percent: Math.min(99, bytePct), label: 'Finalizing…', showEta: false, complete: false }
+    case 'verifying':
       return { percent: Math.min(99, bytePct), label: 'Verifying…', showEta: false, complete: false }
+    case 'extracting':
+      return { percent: 0, label: 'Extracting metadata…', showEta: false, complete: false }
     case 'preparing':
       return { percent: 0, label: 'Preparing', showEta: false, complete: false }
     case 'encrypting':

@@ -17,6 +17,14 @@ import {
 import { browserCapabilities } from '../lib/browserCapabilities'
 import { releaseDecryptedBlobUrlForFile } from '../lib/decryptedBlobCache'
 import { invalidateSignedMedia } from '../lib/media/resolveMedia'
+import { useVault } from '../context/useVault'
+import {
+  downloadOriginalFile,
+  prepareOriginalForSharing,
+  sharePreparedOriginal,
+  supportsFileSharing,
+  type OriginalExportStage,
+} from '../lib/media/originalExport'
 
 type FileRow = {
   id: string
@@ -31,6 +39,10 @@ type FileRow = {
   mime_type?: string | null
   upload_status?: string | null
   deleted_at?: string | null
+  encryption_version?: number | null
+  wrapped_dek?: string | null
+  encryption_chunk_size?: number | null
+  metadata_json?: Record<string, unknown> | null
 }
 
 function isGalleryFile(f: FileRow): boolean {
@@ -190,7 +202,8 @@ export function FullScreenMediaViewer() {
   const { albumId, fileId } = useParams<{ albumId: string; fileId: string }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const { user } = useAuth()
+  const { user, session } = useAuth()
+  const { masterKey } = useVault()
   const legacyViewer = !browserCapabilities.supportsAdvancedViewer
 
   const sort = (location.state as { sort?: FileSort } | null)?.sort ?? 'newest'
@@ -202,6 +215,9 @@ export function FullScreenMediaViewer() {
   const [playbackRate, setPlaybackRate] = useState(1)
   const [videoLoop, setVideoLoop] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [exportStatus, setExportStatus] = useState<string | null>(null)
+  const [exportBusy, setExportBusy] = useState(false)
+  const [preparedShare, setPreparedShare] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
   const stageRef = useRef<HTMLDivElement | null>(null)
@@ -221,13 +237,65 @@ export function FullScreenMediaViewer() {
   const currentFile = index >= 0 ? displayFiles[index] : null
   const currentIsVideo = currentFile ? isVideo(currentFile.file_name) : false
 
-  const { downloadUrl: downloadHref } = useDecryptedMediaSrc(
-    currentFile?.file_url ?? null,
-    currentFile?.is_encrypted,
-    user?.id ?? null,
-    currentFile?.file_name ?? '',
-    currentFile?.id,
-  )
+  const exportStage = (stage: OriginalExportStage) => {
+    const labels: Record<OriginalExportStage, string> = {
+      preparing: 'Preparing file…',
+      decrypting: 'Decrypting original…',
+      ready: 'Ready to save…',
+      sharing: 'Opening share sheet…',
+      downloading: 'Starting download…',
+    }
+    setExportStatus(labels[stage])
+  }
+
+  const runExport = async (mode: 'photos' | 'download') => {
+    if (!currentFile || !session?.access_token || exportBusy) return
+    setMenuOpen(false)
+    setExportBusy(true)
+    setExportStatus(mode === 'photos' ? 'Preparing file…' : 'Preparing download…')
+    try {
+      const options = {
+        file: currentFile,
+        accessToken: session.access_token,
+        masterKey,
+        onStage: exportStage,
+      }
+      if (mode === 'photos') {
+        const prepared = await prepareOriginalForSharing(options)
+        setPreparedShare(prepared)
+        setExportStatus('Ready to save — tap Open share sheet.')
+      } else {
+        await downloadOriginalFile(options)
+        setExportStatus('Download started. On iPhone, check Files → Downloads.')
+      }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') setExportStatus('Share sheet closed.')
+      else setExportStatus(e instanceof Error ? e.message : 'Download failed — retry.')
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
+  const openPreparedShare = async () => {
+    if (!preparedShare || exportBusy) return
+    setExportBusy(true)
+    setExportStatus('Opening share sheet…')
+    try {
+      await sharePreparedOriginal(preparedShare)
+      setExportStatus('Share sheet opened — choose Save Image or Save Video.')
+      setPreparedShare(null)
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') setExportStatus('Share sheet closed.')
+      else setExportStatus(e instanceof Error ? e.message : 'Could not open the share sheet.')
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    setPreparedShare(null)
+    setExportStatus(null)
+  }, [currentFile?.id])
 
   useEffect(() => {
     if (!user || !fileId) return
@@ -285,16 +353,27 @@ export function FullScreenMediaViewer() {
   useEffect(() => {
     const el = stageRef.current
     if (!el) return
-    const updateSlideWidth = () => setSlideW(el.clientWidth)
+    const updateSlideWidth = () => {
+      const measured = Math.round(el.getBoundingClientRect().width || el.clientWidth || window.innerWidth)
+      if (measured > 0) setSlideW(measured)
+    }
     if (typeof ResizeObserver === 'undefined') {
       window.addEventListener('resize', updateSlideWidth)
+      window.visualViewport?.addEventListener('resize', updateSlideWidth)
       updateSlideWidth()
-      return () => window.removeEventListener('resize', updateSlideWidth)
+      return () => {
+        window.removeEventListener('resize', updateSlideWidth)
+        window.visualViewport?.removeEventListener('resize', updateSlideWidth)
+      }
     }
     const ro = new ResizeObserver(updateSlideWidth)
     ro.observe(el)
+    window.visualViewport?.addEventListener('resize', updateSlideWidth)
     updateSlideWidth()
-    return () => ro.disconnect()
+    return () => {
+      ro.disconnect()
+      window.visualViewport?.removeEventListener('resize', updateSlideWidth)
+    }
   }, [loading])
 
   useEffect(() => {
@@ -503,17 +582,24 @@ export function FullScreenMediaViewer() {
                   </button>
                 </>
               ) : null}
-              <a
+              {supportsFileSharing() && ['image', 'video'].includes(classifyFileKind({ name: currentFile.file_name, mime_type: currentFile.mime_type })) ? (
+                <button
+                  type="button"
+                  className="fs-media-viewer__menu-item"
+                  disabled={exportBusy}
+                  onClick={() => void runExport('photos')}
+                >
+                  Save to Photos
+                </button>
+              ) : null}
+              <button
+                type="button"
                 className="fs-media-viewer__menu-item"
-                href={downloadHref ?? '#'}
-                download={currentFile.file_name}
-                onClick={(ev) => {
-                  if (!downloadHref) ev.preventDefault()
-                  setMenuOpen(false)
-                }}
+                disabled={exportBusy}
+                onClick={() => void runExport('download')}
               >
-                Download
-              </a>
+                Download File
+              </button>
             </div>
           ) : null}
         </div>
@@ -564,7 +650,11 @@ export function FullScreenMediaViewer() {
               const vid = isVideo(f.file_name)
               const nearby = Math.abs(i - index) <= 1
               return (
-                <div key={f.id} className="fs-media-viewer__slide" style={{ width: slideW > 0 ? slideW : '100%' }}>
+                <div
+                  key={f.id}
+                  className="fs-media-viewer__slide"
+                  style={slideW > 0 ? { width: slideW, minWidth: slideW, flexBasis: slideW } : undefined}
+                >
                   {user && nearby ? (
                     classifyFileKind({ name: f.file_name, mime_type: f.mime_type }) === 'video' || vid ? (
                       <SlideVideo file={f} userId={user.id} isActive={i === index} playbackRate={playbackRate} loop={videoLoop} />
@@ -591,6 +681,16 @@ export function FullScreenMediaViewer() {
       <div className="fs-media-viewer__counter" aria-hidden>
         {index + 1} / {displayFiles.length}
       </div>
+      {exportStatus ? (
+        <div className="fs-media-viewer__export-status" role="status">
+          <span>{exportStatus}</span>
+          {preparedShare ? (
+            <button type="button" className="btn btn--primary" onClick={() => void openPreparedShare()}>
+              Open share sheet
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

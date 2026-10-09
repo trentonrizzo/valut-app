@@ -53,7 +53,7 @@ describe('small MP4 success path', () => {
     const plan = planUpload(2_200_000)
     expect(plan.useMultipart).toBe(false)
     expect(isVideoUpload({ name: 'clip.mp4', type: 'video/mp4' })).toBe(true)
-    expect(displayProgress({ state: 'finalizing', size: 2_200_000, uploadedBytes: 2_200_000 }).label).toBe(
+    expect(displayProgress({ state: 'verifying', size: 2_200_000, uploadedBytes: 2_200_000 }).label).toBe(
       'Verifying…',
     )
   })
@@ -203,12 +203,15 @@ describe('progress does not report Complete before finalization', () => {
   it('caps percent at 99% until catalog success', () => {
     const uploading = displayProgress({ state: 'uploading', size: 100, uploadedBytes: 100 })
     const finalizing = displayProgress({ state: 'finalizing', size: 100, uploadedBytes: 100 })
+    const verifying = displayProgress({ state: 'verifying', size: 100, uploadedBytes: 100 })
     const done = displayProgress({ state: 'complete', size: 100, uploadedBytes: 100 })
     expect(uploading.percent).toBeLessThan(100)
     expect(uploading.complete).toBe(false)
     expect(finalizing.percent).toBe(99)
-    expect(finalizing.label).toBe('Verifying…')
+    expect(finalizing.label).toBe('Finalizing…')
     expect(finalizing.showEta).toBe(false)
+    expect(verifying.label).toBe('Verifying…')
+    expect(verifying.complete).toBe(false)
     expect(done.percent).toBe(100)
     expect(done.label).toBe('Complete')
     expect(progressIsComplete('finalizing')).toBe(false)

@@ -401,7 +401,8 @@ export async function backfillMediaMetadataBatch(opts: {
       const existingTechnical = existingMetadata.technicalMetadata
       const hasTechnical = existingTechnical && typeof existingTechnical === 'object'
         && Number((existingTechnical as { metadataVersion?: unknown }).metadataVersion) >= TECHNICAL_METADATA_VERSION
-      const needsCapture = !row.captured_at && !row.captured_at_local && !row.captured_at_source
+      const untrustedFilesystemFallback = row.captured_at_source === 'file_last_modified'
+      const needsCapture = untrustedFilesystemFallback || (!row.captured_at && !row.captured_at_local && !row.captured_at_source)
       let capture = null
       let technical = null
       if (needsCapture || !hasTechnical || !row.width || !row.height || (isVideo && !row.duration_ms)) {
@@ -455,6 +456,16 @@ export async function backfillMediaMetadataBatch(opts: {
       const patch: Record<string, unknown> = {
         metadata_json: {
           ...existingMetadata,
+          filesystemModifiedAt:
+            existingMetadata.filesystemModifiedAt
+            ?? (untrustedFilesystemFallback ? row.captured_at : null),
+          legacyCaptureFallback: untrustedFilesystemFallback
+            ? {
+                value: row.captured_at,
+                source: 'file_last_modified',
+                replacedAt: new Date().toISOString(),
+              }
+            : existingMetadata.legacyCaptureFallback ?? null,
           sourceSizeBytes: existingMetadata.sourceSizeBytes ?? row.file_size_bytes,
           technicalMetadata: technical ?? existingTechnical ?? null,
           integrityEvidence: integrityEvidence ?? null,
@@ -468,6 +479,12 @@ export async function backfillMediaMetadataBatch(opts: {
         updated += 1
       } else if (needsCapture) {
         unknown += 1
+        if (untrustedFilesystemFallback) {
+          patch.captured_at = null
+          patch.captured_at_local = null
+          patch.captured_at_offset = null
+          patch.captured_at_source = null
+        }
       }
       const technicalValue = technical && typeof technical === 'object' ? technical as ReturnType<typeof extractTechnicalMetadataFromSegments> : null
       if (technicalValue) {

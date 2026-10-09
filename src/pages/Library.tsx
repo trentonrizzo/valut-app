@@ -31,7 +31,9 @@ import {
 } from '../lib/upload/manager'
 import { liveToQueueItems } from '../lib/upload/queueUi'
 import { formatEta } from '../lib/upload/strategy'
-import { apiSignedGet } from '../lib/upload/storageApi'
+import { downloadOriginalFile } from '../lib/media/originalExport'
+import { useVault } from '../context/useVault'
+import { supabase } from '../lib/supabase'
 import { FilterBar } from '../components/library/FilterBar'
 import { BulkActionBar } from '../components/library/BulkActionBar'
 import { TagPickerModal } from '../components/library/TagPickerModal'
@@ -43,6 +45,7 @@ import { useMediaSelection } from '../context/SelectionContext'
 
 export function Library() {
   const { user, session } = useAuth()
+  const { masterKey } = useVault()
   const { showToast } = useToast()
   const navigate = useNavigate()
   const [params] = useSearchParams()
@@ -156,7 +159,7 @@ export function Library() {
   }, [queueTick])
   const queueTotals = batchTotals(getLiveUploads())
   const currentUpload = getLiveUploads().find((j) =>
-    ['uploading', 'preparing', 'encrypting', 'finalizing', 'retrying'].includes(j.state),
+    ['uploading', 'preparing', 'extracting', 'encrypting', 'finalizing', 'verifying', 'retrying'].includes(j.state),
   )
 
   async function downloadSelected() {
@@ -164,12 +167,19 @@ export function Library() {
     if (!token) return
     for (const id of selected) {
       try {
-        const r = await apiSignedGet(token, id, 'original')
-        const a = document.createElement('a')
-        a.href = r.url
-        a.download = rows.find((x) => x.id === id)?.file_name || 'download'
-        a.rel = 'noopener'
-        a.click()
+        let file = rows.find((x) => x.id === id) ?? null
+        if (!file && user) {
+          const { data, error } = await supabase
+            .from('files')
+            .select('id,file_name,file_url,file_size_bytes,is_encrypted,mime_type')
+            .eq('id', id)
+            .eq('user_id', user.id)
+            .maybeSingle()
+          if (error) throw new Error(error.message)
+          file = data as FileRow | null
+        }
+        if (!file) throw new Error('File record not found')
+        await downloadOriginalFile({ file, accessToken: token, masterKey })
       } catch (e) {
         showToast(e instanceof Error ? e.message : 'Download failed', 'error')
       }

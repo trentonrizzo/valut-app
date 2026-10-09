@@ -108,9 +108,30 @@ describe('data-safety source contracts', () => {
 
   it('always renders Created separately from Uploaded and keeps Created visible when unknown', () => {
     const src = readFileSync(join(root, 'src/components/files/MediaDetailsSheet.tsx'), 'utf8')
-    expect(src).toContain("{ label: 'Created', value: fmtCaptured(file) }")
-    expect(src).toContain("{ label: 'Uploaded', value: fmtDate(file.created_at) }")
+    expect(src).toContain("{ label: 'Original creation', value: fmtCaptured(file) }")
+    expect(src).toContain("{ label: 'Uploaded to Vault', value: fmtDate(file.created_at) }")
+    expect(src).toContain("file.captured_at_source === 'file_last_modified'")
     expect(src).toContain("return 'Unknown'")
+  })
+
+  it('downloads through attachment URLs and shares decrypted originals without changing storage', () => {
+    const helper = readFileSync(join(root, 'src/lib/media/originalExport.ts'), 'utf8')
+    const signed = readFileSync(join(root, 'api/storage/signed-get.js'), 'utf8')
+    expect(helper).toContain("'attachment'")
+    expect(helper).toContain('navigator.share')
+    expect(helper).toContain('Save Image/Save Video')
+    expect(helper).not.toContain('DeleteObject')
+    expect(helper).not.toContain('PutObject')
+    expect(signed).toContain("dispositionRaw === 'attachment'")
+  })
+
+  it('queues files before probing and never treats picker modified time as camera capture time', () => {
+    const manager = readFileSync(join(root, 'src/lib/upload/manager.ts'), 'utf8')
+    const extractor = readFileSync(join(root, 'src/lib/upload/extractMetadata.ts'), 'utf8')
+    expect(manager.indexOf('await persist(job)')).toBeLessThan(manager.lastIndexOf('await probeSelectedFile(file)'))
+    expect(manager).toContain('filesystemModifiedAt')
+    expect(manager).toContain('capturedAt: null')
+    expect(extractor).toContain('return { capture: none, technicalMetadata }')
   })
 
   it('keeps bounded capture extraction active in legacy upload mode', () => {

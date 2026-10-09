@@ -20,6 +20,8 @@ export default async function handler(req, res) {
     const fileId = typeof q.fileId === 'string' ? q.fileId : Array.isArray(q.fileId) ? q.fileId[0] : null
     const variantRaw = typeof q.variant === 'string' ? q.variant : Array.isArray(q.variant) ? q.variant[0] : 'original'
     const variant = variantRaw || 'original'
+    const dispositionRaw = typeof q.disposition === 'string' ? q.disposition : Array.isArray(q.disposition) ? q.disposition[0] : 'inline'
+    const disposition = dispositionRaw === 'attachment' && variant === 'original' ? 'attachment' : 'inline'
     if (!fileId) {
       return sendJson(res, 400, { ok: false, error: 'fileId is required' })
     }
@@ -57,7 +59,7 @@ export default async function handler(req, res) {
     const command = new GetObjectCommand({
       Bucket: getBucket(),
       Key: key,
-      ResponseContentDisposition: 'inline',
+      ResponseContentDisposition: `${disposition}; filename*=UTF-8''${encodeURIComponent(row.file_name || 'download')}`,
       ...(mime ? { ResponseContentType: mime } : {}),
     })
     const signedUrl = await getSignedUrl(getR2Client(), command, { expiresIn: GET_EXPIRES })

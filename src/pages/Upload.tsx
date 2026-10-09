@@ -61,7 +61,7 @@ export function Upload() {
   }, [tick])
   const totals = batchTotals(getLiveUploads())
   const current = getLiveUploads().find((j) =>
-    ['uploading', 'preparing', 'encrypting', 'finalizing', 'retrying'].includes(j.state),
+    ['uploading', 'preparing', 'extracting', 'encrypting', 'finalizing', 'verifying', 'retrying'].includes(j.state),
   )
 
   const start = useCallback(

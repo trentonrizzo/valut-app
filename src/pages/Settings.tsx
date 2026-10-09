@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useVault } from '../context/useVault'
@@ -23,6 +23,9 @@ function loadMetadataCursor(userId: string): CaptureCursor | null {
 function saveMetadataCursor(userId: string, cursor: CaptureCursor) {
   try { localStorage.setItem(metadataCursorKey(userId), JSON.stringify(cursor)) } catch { /* optional resume checkpoint */ }
 }
+function clearMetadataCursor(userId: string) {
+  try { localStorage.removeItem(metadataCursorKey(userId)) } catch { /* optional resume checkpoint */ }
+}
 import { backfillMediaMetadataBatch, hashMissingBatch } from '../lib/mediaIndexBackfill'
 
 export function Settings() {
@@ -36,6 +39,9 @@ export function Settings() {
   const [pin, setPin] = useState('')
   const [pinSet, setPinSet] = useState(false)
   const [storage, setStorage] = useState<VaultStorageStats | null>(null)
+  const [metadataBusy, setMetadataBusy] = useState(false)
+  const [metadataProgress, setMetadataProgress] = useState<string | null>(null)
+  const stopMetadataRef = useRef(false)
 
   useEffect(() => {
     void vaultPinIsSet().then(setPinSet).catch(() => setPinSet(false))
@@ -203,7 +209,7 @@ export function Settings() {
             <button
               type="button"
               className="btn btn--ghost btn--block"
-              disabled={busy || !user || !session?.access_token}
+              disabled={busy || metadataBusy || !user || !session?.access_token}
               onClick={async () => {
                 if (!user || !session?.access_token) return
                 setBusy(true)
@@ -248,10 +254,11 @@ export function Settings() {
             <button
               type="button"
               className="btn btn--ghost btn--block"
-              disabled={busy || !user || !session?.access_token}
+              disabled={busy || metadataBusy || !user || !session?.access_token}
               onClick={async () => {
                 if (!user || !session?.access_token) return
-                setBusy(true)
+                setMetadataBusy(true)
+                stopMetadataRef.current = false
                 setMsg(null)
                 try {
                   const saved = loadMetadataCursor(user.id)
@@ -265,6 +272,7 @@ export function Settings() {
                   let integrityVerified = 0
                   let failed = 0
                   for (let i = 0; i < 20; i++) {
+                    if (stopMetadataRef.current) break
                     const batch = await backfillMediaMetadataBatch({
                       userId: user.id,
                       accessToken: session.access_token,
@@ -283,20 +291,47 @@ export function Settings() {
                     cursorCreatedAt = batch.nextCursorCreatedAt
                     cursorId = batch.nextCursorId
                     saveMetadataCursor(user.id, { createdAt: cursorCreatedAt, id: cursorId, done: batch.done })
+                    setMetadataProgress(
+                      `${updated} dates recovered · ${unknown} unknown · ${technicalUpdated} technical · ${integrityVerified} verified · ${failed} failed`,
+                    )
                     if (batch.done) break
+                    await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
                   }
                   setMsg(
-                    `Media metadata: ${updated} Created dates recovered, ${technicalUpdated} technical records, ${integrityVerified} storage objects verified, ${unknown} dates unknown, ${technicalSkipped} safely skipped, ${failed} failed (${skipped} unchanged).`,
+                    `Media metadata${stopMetadataRef.current ? ' paused' : ''}: ${updated} Original creation dates recovered, ${technicalUpdated} technical records, ${integrityVerified} storage objects verified, ${unknown} dates unknown, ${technicalSkipped} safely skipped, ${failed} failed (${skipped} unchanged).`,
                   )
                 } catch (e) {
                 setMsg(e instanceof Error ? e.message : 'Media metadata backfill failed')
                 } finally {
-                  setBusy(false)
+                  setMetadataBusy(false)
                 }
               }}
             >
-              Recover media details (safe resumable batch)
+              {metadataBusy ? 'Recovering media details…' : 'Recover media details (resume)'}
             </button>
+            {metadataBusy ? (
+              <button
+                type="button"
+                className="btn btn--outline btn--block"
+                onClick={() => { stopMetadataRef.current = true }}
+              >
+                Pause after current item
+              </button>
+            ) : null}
+            {!metadataBusy && user ? (
+              <button
+                type="button"
+                className="btn btn--ghost btn--block"
+                onClick={() => {
+                  clearMetadataCursor(user.id)
+                  setMetadataProgress(null)
+                  setMsg('Metadata scan checkpoint reset. Existing metadata and originals were not changed; run Recover to retry the library.')
+                }}
+              >
+                Restart metadata scan / retry failures
+              </button>
+            ) : null}
+            {metadataProgress ? <p className="settings-placeholder">Progress: {metadataProgress}</p> : null}
             {msg ? <p className="settings-placeholder">{msg}</p> : null}
           </div>
         </section>

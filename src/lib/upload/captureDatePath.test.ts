@@ -3,18 +3,24 @@ import { extractImageCaptureDateFromBuffer } from './exifCaptureDate'
 import { extractVideoCaptureDateFromSegments } from './videoCaptureDate'
 import { captureMetadataChunkIndexes } from '../mediaIndexBackfill'
 
-function tiffCapture(date = '2023:08:17 19:42:16', offset = '-05:00'): ArrayBuffer {
+function tiffCapture(date = '2023:08:17 19:42:16', offset = '-05:00', subsec: string | null = null): ArrayBuffer {
   const bytes = new Uint8Array(128)
   const view = new DataView(bytes.buffer)
   bytes.set([0x49, 0x49, 0x2a, 0x00], 0)
   view.setUint32(4, 8, true)
   view.setUint16(8, 1, true)
   view.setUint16(10, 0x8769, true); view.setUint16(12, 4, true); view.setUint32(14, 1, true); view.setUint32(18, 26, true)
-  view.setUint16(26, 2, true)
+  view.setUint16(26, subsec ? 3 : 2, true)
   view.setUint16(28, 0x9003, true); view.setUint16(30, 2, true); view.setUint32(32, 20, true); view.setUint32(36, 64, true)
   view.setUint16(40, 0x9011, true); view.setUint16(42, 2, true); view.setUint32(44, 7, true); view.setUint32(48, 88, true)
+  if (subsec) {
+    view.setUint16(52, 0x9291, true); view.setUint16(54, 2, true); view.setUint32(56, subsec.length + 1, true)
+    if (subsec.length + 1 > 4) view.setUint32(60, 104, true)
+    else bytes.set([...subsec, '\0'].map((c) => c.charCodeAt(0)), 60)
+  }
   bytes.set([...date, '\0'].map((c) => c.charCodeAt(0)), 64)
   bytes.set([...offset, '\0'].map((c) => c.charCodeAt(0)), 88)
+  if (subsec && subsec.length + 1 > 4) bytes.set([...subsec, '\0'].map((c) => c.charCodeAt(0)), 104)
   return bytes.buffer
 }
 
@@ -37,6 +43,13 @@ describe('end-to-end bounded capture metadata parsing', () => {
       capturedLocal: '2023-08-17T19:42:16',
       capturedOffset: '-05:00',
       source: 'exif_datetime_original',
+    })
+  })
+
+  it('preserves EXIF SubSecTimeOriginal precision', () => {
+    expect(extractImageCaptureDateFromBuffer(tiffCapture(undefined, undefined, '375'))).toMatchObject({
+      capturedAt: '2023-08-18T00:42:16.375Z',
+      capturedLocal: '2023-08-17T19:42:16.375',
     })
   })
 

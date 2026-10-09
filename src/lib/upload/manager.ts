@@ -26,7 +26,7 @@ import {
 import { deleteJob, listJobs, saveJob, type PersistedUploadJob, type UploadUiState } from './queueStore'
 import { fileConcurrency, isIosDevice, partConcurrency, partGapMs, putWithRetry, sleep } from './multipartConfig'
 import { getPreferredUploadMode, normalizeUploadMode, setPreferredUploadMode, type UploadMode } from './uploadMode'
-import { extractBoundedMediaMetadata, extractMediaMetadata, fileModifiedFallback, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
+import { extractBoundedMediaMetadata, extractMediaMetadata, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
 import { sha256HexOfFileBestEffort } from './contentHash'
 import {
   canCatalogReady,
@@ -183,18 +183,15 @@ export async function enqueueFiles(files: File[], opts: { albumId: string | null
   const usable: File[] = []
   for (const file of files) {
     const inspected = inspectSelectedFile(file)
-    const probe = await probeSelectedFile(file)
     logUploadSelection('select', {
       name: inspected.name,
       size: inspected.size,
       type: inspected.type,
       extension: inspected.extension,
       lastModified: inspected.lastModified,
-      zeroByte: probe.zeroByte,
-      readable: probe.readable,
-      readableBytes: probe.readableBytes,
+      zeroByte: file.size <= 0,
     })
-    if (probe.zeroByte || !probe.readable) continue
+    if (file.size <= 0) continue
     usable.push(file)
   }
   if (usable.length === 0) {
@@ -249,15 +246,10 @@ export async function enqueueFiles(files: File[], opts: { albumId: string | null
       width: null,
       height: null,
       durationMs: null,
-      ...(() => {
-        const fallback = fileModifiedFallback(file)
-        return {
-          capturedAt: fallback.capturedAt,
-          capturedAtLocal: fallback.capturedAtLocal,
-          capturedAtOffset: fallback.capturedAtOffset,
-          capturedAtSource: fallback.capturedAtSource,
-        }
-      })(),
+      capturedAt: null,
+      capturedAtLocal: null,
+      capturedAtOffset: null,
+      capturedAtSource: null,
       createdAt: Date.now(),
       r2Complete: false,
       r2Verified: false,
@@ -268,6 +260,10 @@ export async function enqueueFiles(files: File[], opts: { albumId: string | null
       errorCode: null,
       lastStage: 'queued',
       lastModified: file.lastModified,
+      filesystemModifiedAt:
+        Number.isFinite(file.lastModified) && file.lastModified > 0
+          ? new Date(file.lastModified).toISOString()
+          : null,
       uploadMode: normalizeUploadMode(opts.mode ?? preferredUploadMode),
     }
     filesInMemory.set(id, file)
@@ -378,7 +374,7 @@ export function dismissFailed() {
 
 export function pauseAll() {
   for (const job of live.values()) {
-    if (['queued', 'preparing', 'encrypting', 'uploading', 'finalizing', 'retrying'].includes(job.state)) {
+    if (['queued', 'preparing', 'extracting', 'encrypting', 'uploading', 'finalizing', 'verifying', 'retrying'].includes(job.state)) {
       pauseJob(job.id)
     }
   }
@@ -403,7 +399,7 @@ async function pump() {
     while (true) {
       const queued = [...live.values()].filter((j) => j.state === 'queued' || j.state === 'retrying')
       const active = [...live.values()].filter((j) =>
-        ['preparing', 'encrypting', 'uploading', 'finalizing'].includes(j.state),
+        ['preparing', 'extracting', 'encrypting', 'uploading', 'finalizing', 'verifying'].includes(j.state),
       )
       const activeLowBandwidth = active.some((job) => normalizeUploadMode(job.uploadMode) === 'low-bandwidth')
       const firstQueuedMode = normalizeUploadMode(queued[0]?.uploadMode)
@@ -420,7 +416,7 @@ async function pump() {
     pumping = false
     const more = [...live.values()].some((j) => j.state === 'queued' || j.state === 'retrying')
     const active = [...live.values()].some((j) =>
-      ['preparing', 'encrypting', 'uploading', 'finalizing'].includes(j.state),
+      ['preparing', 'extracting', 'encrypting', 'uploading', 'finalizing', 'verifying'].includes(j.state),
     )
     if (more && !active) void pump()
   }
@@ -450,7 +446,23 @@ async function runJob(id: string) {
 
   try {
     if (file) {
+      const probe = await probeSelectedFile(file)
+      logUploadSelection('readability-probe', {
+        name: file.name,
+        size: file.size,
+        zeroByte: probe.zeroByte,
+        readable: probe.readable,
+        readableBytes: probe.readableBytes,
+      })
+      if (probe.zeroByte || !probe.readable) {
+        throw codedError(
+          'ERR_FILE_UNREADABLE',
+          'The selected file is not readable. If it is stored in iCloud, open it in Photos, wait for the original to download, then retry.',
+        )
+      }
       const preparationStarted = Date.now()
+      job = { ...job, state: 'extracting', lastStage: 'extracting-metadata' }
+      await persist(job)
       if (!browserCapabilities.isLegacyMode) {
         try {
           const meta = await extractMediaMetadata(file)
@@ -606,14 +618,14 @@ async function runJob(id: string) {
       }
     }
 
-    job = { ...job, state: 'finalizing', uploadedBytes: job.size, lastStage: 'r2_completing' }
+    job = { ...job, state: 'verifying', uploadedBytes: job.size, lastStage: 'r2_completing' }
     await persist(job)
     job = await assembleAndVerify(job, authFetch)
     if (!canCatalogReady(job)) {
       throw codedError('ERR_R2_VERIFY', 'R2 object was not verified; not adding to Library.')
     }
 
-    job = { ...job, lastStage: 'cataloging' }
+    job = { ...job, state: 'finalizing', lastStage: 'cataloging' }
     await persist(job)
 
     let thumbnailKey: string | null = null
@@ -718,6 +730,7 @@ async function finalizeCatalog(
     metadata_json: {
       fileNonce: job.fileNonceB64,
       captureDateSource: job.capturedAtSource ?? null,
+      filesystemModifiedAt: job.filesystemModifiedAt ?? null,
       sourceSizeBytes: job.size,
       technicalMetadata: job.technicalMetadata ?? null,
       integrityEvidence: job.r2Verified && job.verifiedSize === expectedVerifySize(job)
