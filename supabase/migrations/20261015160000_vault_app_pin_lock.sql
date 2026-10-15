@@ -320,6 +320,21 @@ begin
 end;
 $$;
 
+-- Older clients call this boolean RPC. It must create the same unlock session.
+create or replace function public.verify_vault_pin(p_pin text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  result jsonb;
+begin
+  result := public.vault_unlock_pin(p_pin);
+  return coalesce((result->>'ok')::boolean, false);
+end;
+$$;
+
 -- Account login alone must not clear the application PIN.
 create or replace function public.clear_vault_pin()
 returns boolean
