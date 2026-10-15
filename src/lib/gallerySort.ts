@@ -17,6 +17,8 @@ type SortableRow = {
   captured_at?: string | null
   captured_at_local?: string | null
   captured_at_source?: string | null
+  captured_at_user?: string | null
+  metadata_json?: unknown
 }
 
 export function sortGalleryFiles<T extends SortableRow>(list: T[], sort: FileSort): T[] {
@@ -26,6 +28,14 @@ export function sortGalleryFiles<T extends SortableRow>(list: T[], sort: FileSor
   const byDateAsc = (a: T, b: T) =>
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   const captureValue = (row: T) => {
+    const meta = row.metadata_json && typeof row.metadata_json === 'object'
+      ? row.metadata_json as { captureCorrection?: { at?: string | null } | null }
+      : null
+    const corrected = row.captured_at_user || meta?.captureCorrection?.at
+    if (corrected) {
+      const userMs = new Date(corrected).getTime()
+      if (Number.isFinite(userMs)) return userMs
+    }
     if (row.captured_at_source === 'file_last_modified') return null
     if (row.captured_at) {
       const value = new Date(row.captured_at).getTime()

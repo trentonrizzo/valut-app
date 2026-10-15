@@ -4,6 +4,7 @@
  */
 import { isImageUpload, isVideoUpload, normalizeUploadMime } from './strategy'
 import { extractImageCaptureDateFromBuffer, type CaptureDateResult } from './exifCaptureDate'
+import { inferFilenameCapture } from '../vaultLockPolicy'
 import { extractVideoCaptureDateFromSegments } from './videoCaptureDate'
 import {
   extractTechnicalMetadataFromSegments,
@@ -122,6 +123,18 @@ export async function extractBoundedMediaMetadata(file: File): Promise<{
           capturedAtOffset: embedded.capturedOffset,
           capturedAtSource: embedded.source,
         }, technicalMetadata }
+    }
+    const inferred = inferFilenameCapture(file.name)
+    if (inferred) {
+      return {
+        capture: {
+          capturedAt: null,
+          capturedAtLocal: inferred.local,
+          capturedAtOffset: null,
+          capturedAtSource: 'filename_inferred',
+        },
+        technicalMetadata,
+      }
     }
     return { capture: none, technicalMetadata }
   } catch {

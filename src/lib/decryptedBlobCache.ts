@@ -30,6 +30,14 @@ export function setDecryptedBlobUrlForFile(fileId: string, url: string): void {
   bump()
 }
 
+export function releaseAllDecryptedBlobUrls(): void {
+  for (const url of cache.values()) {
+    if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+  }
+  cache.clear()
+  bump()
+}
+
 export function releaseDecryptedBlobUrlForFile(fileId: string): void {
   const url = cache.get(fileId)
   if (!url) return

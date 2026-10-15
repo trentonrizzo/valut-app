@@ -4082,3 +4082,72 @@ button {
   .links-list__item { grid-template-columns: auto minmax(0, 1fr) auto; }
   .links-list__item > .btn:nth-last-child(-n+2) { grid-column: span 1; }
 }
+
+.pin-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: #07060b;
+  color: #f5f3ff;
+}
+.pin-lock__card {
+  width: min(100%, 24rem);
+  display: grid;
+  gap: 0.85rem;
+  justify-items: center;
+  text-align: center;
+}
+.pin-lock__card h1 { margin: 0; font-size: 1.35rem; font-weight: 560; letter-spacing: -0.02em; }
+.pin-lock__mark {
+  width: 3.25rem;
+  height: 3.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: radial-gradient(circle at 40% 30%, #6d5b93, #1b1428 70%);
+  box-shadow: 0 10px 30px rgba(70, 40, 120, 0.35);
+  font-size: 1.4rem;
+}
+.pin-lock__hint { margin: 0; color: #b7adc8; font-size: 0.92rem; }
+.pin-lock__dots { display: flex; gap: 0.7rem; min-height: 1rem; }
+.pin-lock__dots span {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 999px;
+  border: 1.5px solid #8d7eaa;
+}
+.pin-lock__dots span.is-filled { background: #efe9ff; border-color: #efe9ff; }
+.pin-lock__dots--shake { animation: pin-shake 0.42s ease; }
+@keyframes pin-shake {
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+.pin-lock__pad {
+  width: min(100%, 18.5rem);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.7rem;
+  margin-top: 0.4rem;
+}
+.pin-lock__key {
+  height: 4rem;
+  border: 0;
+  border-radius: 999px;
+  background: #16131d;
+  color: inherit;
+  font-size: 1.45rem;
+  cursor: pointer;
+}
+.pin-lock__key:active { transform: scale(0.96); background: #2a2436; }
+.pin-lock__key--ok { color: #d8c9ff; }
+.pin-lock__codes { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; font-family: var(--mono); font-size: 0.85rem; }
+.pin-lock__attempt { width: 100%; text-align: left; display: grid; gap: 0.25rem; }
+.pin-lock__attempt img { width: 100%; max-height: 10rem; object-fit: cover; border-radius: 8px; }
+@media (max-width: 380px) {
+  .pin-lock__key { height: 3.4rem; }
+}

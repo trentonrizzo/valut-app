@@ -9,6 +9,8 @@ import { TagPickerModal } from '../library/TagPickerModal'
 import { setFavorite } from '../../lib/albumMembership'
 import { isVideoMime } from '../../lib/mediaTypes'
 import { calculateOverallBitrate, type TechnicalMediaMetadata } from '../../lib/upload/technicalMetadata'
+import { displayOriginalInstant } from '../../lib/vaultLockPolicy'
+import { supabase } from '../../lib/supabase'
 
 type Props = {
   file: FileRow | null
@@ -23,14 +25,13 @@ function fmtDate(iso: string | null | undefined): string {
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
 }
 
-function fmtCaptured(file: FileRow): string {
-  if (file.captured_at_source === 'file_last_modified') return 'Unknown'
-  if (file.captured_at) return fmtDate(file.captured_at)
-  if (file.captured_at_local) {
-    const display = file.captured_at_local.replace('T', ' ')
-    return `${display}${file.captured_at_offset ? ` ${file.captured_at_offset}` : ' (timezone unknown)'}`
+function userCorrection(file: FileRow): string | null {
+  const meta = file.metadata_json?.captureCorrection
+  if (meta && typeof meta === 'object' && typeof (meta as { at?: unknown }).at === 'string') {
+    return (meta as { at: string }).at
   }
-  return 'Unknown'
+  const extra = (file as FileRow & { captured_at_user?: string | null }).captured_at_user
+  return extra || null
 }
 
 function fmtDuration(ms: number | null | undefined): string {
@@ -92,6 +93,8 @@ export function MediaDetailsSheet({ file, onClose, onChanged }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [tagModal, setTagModal] = useState<'add' | 'remove' | null>(null)
   const [favorite, setFavoriteLocal] = useState(false)
+  const [draftDate, setDraftDate] = useState('')
+  const [dateMsg, setDateMsg] = useState<string | null>(null)
 
   useEffect(() => {
     if (!file || !user) {
@@ -129,7 +132,13 @@ export function MediaDetailsSheet({ file, onClose, onChanged }: Props) {
       label: 'Original filename',
       value: String((file as FileRow & { original_filename?: string | null }).original_filename || file.file_name),
     },
-    { label: 'Original creation', value: fmtCaptured(file) },
+    { label: 'Original Created', value: displayOriginalInstant({
+      capturedAt: file.captured_at,
+      capturedLocal: file.captured_at_local,
+      capturedOffset: file.captured_at_offset,
+      source: file.captured_at_source,
+      userAt: userCorrection(file),
+    }).text },
     { label: 'Uploaded to Vault', value: fmtDate(file.created_at) },
     ...(file.captured_at_source && file.captured_at_source !== 'file_last_modified'
       ? [{ label: 'Creation date source', value: file.captured_at_source.replace(/_/g, ' ') }]
@@ -184,6 +193,59 @@ export function MediaDetailsSheet({ file, onClose, onChanged }: Props) {
               <dd title={row.value}>{row.value}</dd>
             </div>
           ))}
+          {displayOriginalInstant({
+            capturedAt: file.captured_at,
+            capturedLocal: file.captured_at_local,
+            capturedOffset: file.captured_at_offset,
+            source: file.captured_at_source,
+            userAt: userCorrection(file),
+          }).explanation ? (
+            <div className="media-details__row">
+              <dt>Date note</dt>
+              <dd>{displayOriginalInstant({
+                capturedAt: file.captured_at,
+                capturedLocal: file.captured_at_local,
+                capturedOffset: file.captured_at_offset,
+                source: file.captured_at_source,
+                userAt: userCorrection(file),
+              }).explanation}</dd>
+            </div>
+          ) : null}
+          <div className="media-details__row">
+            <dt>Correct original date</dt>
+            <dd>
+              <input className="field-input" type="datetime-local" value={draftDate} onChange={(e) => setDraftDate(e.target.value)} />
+              <button
+                type="button"
+                className="btn btn--outline btn--block"
+                onClick={() => {
+                  if (!draftDate) return
+                  const at = new Date(draftDate).toISOString()
+                  const next = {
+                    ...(file.metadata_json || {}),
+                    captureCorrection: { at, setAt: new Date().toISOString() },
+                  }
+                  void supabase.from('files').update({ metadata_json: next, captured_at_user: at }).eq('id', file.id).then(async (first) => {
+                    if (first.error && /captured_at_user|schema cache|column/i.test(first.error.message)) {
+                      const retry = await supabase.from('files').update({ metadata_json: next }).eq('id', file.id)
+                      if (retry.error) {
+                        setDateMsg('Could not save the date')
+                        return
+                      }
+                    } else if (first.error) {
+                      setDateMsg('Could not save the date')
+                      return
+                    }
+                    setDateMsg('Original date corrected. Extracted metadata was kept.')
+                    onChanged?.()
+                  })
+                }}
+              >
+                Save corrected date
+              </button>
+              {dateMsg ? <p className="settings-placeholder">{dateMsg}</p> : null}
+            </dd>
+          </div>
           <div className="media-details__row">
             <dt>Albums</dt>
             <dd>

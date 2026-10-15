@@ -8,6 +8,7 @@ export type CaptureDateSource =
   | 'quicktime_day'
   | 'quicktime_mvhd'
   | 'file_last_modified'
+  | 'filename_inferred'
   | 'user_entered'
 
 export type CaptureDateResult = {

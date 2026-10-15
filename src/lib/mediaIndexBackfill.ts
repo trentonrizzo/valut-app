@@ -13,6 +13,7 @@ import { decryptChunk, importDek, CHUNK_PLAINTEXT_BYTES, GCM_TAG_BYTES } from '.
 import { base64ToBytes, unwrapDek } from './crypto/envelope'
 import { extractTechnicalMetadataFromSegments, TECHNICAL_METADATA_VERSION } from './upload/technicalMetadata'
 import { storedObjectBytes } from './upload/storedSize'
+import { inferFilenameCapture } from './vaultLockPolicy'
 
 export type HashBatchResult = {
   scanned: number
@@ -426,6 +427,17 @@ export async function backfillMediaMetadataBatch(opts: {
           skipped += 1
           technicalSkipped += 1
           messages.push(`${row.file_name}: ${metadataError.message}`)
+        }
+      }
+      if (needsCapture && !capture) {
+        const inferred = inferFilenameCapture(row.file_name || '')
+        if (inferred) {
+          capture = {
+            capturedAt: null,
+            capturedLocal: inferred.local,
+            capturedOffset: null,
+            source: 'filename_inferred',
+          }
         }
       }
 

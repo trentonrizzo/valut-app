@@ -46,6 +46,7 @@ function row(id: string, name: string): FileRow {
     wrapped_dek: null, encryption_chunk_size: null, metadata_json: {}, deleted_at: null, locked: false,
     stored_size_bytes: 1, storage_integrity: 'ready', membership_snapshot: null, original_filename: name,
     source_url: null, description: null, content_hash: null, hash_algo: null, hash_status: null,
+    captured_at_user: null, captured_at_confidence: null,
   }
 }
 

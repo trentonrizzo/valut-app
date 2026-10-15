@@ -105,6 +105,8 @@ export interface Database {
           captured_at_local: string | null
           captured_at_offset: string | null
           captured_at_source: string | null
+          captured_at_user: string | null
+          captured_at_confidence: string | null
           favorite: boolean
           rating: number | null
           thumbnail_key: string | null
@@ -147,6 +149,8 @@ export interface Database {
           captured_at_local?: string | null
           captured_at_offset?: string | null
           captured_at_source?: string | null
+          captured_at_user?: string | null
+          captured_at_confidence?: string | null
           favorite?: boolean
           rating?: number | null
           thumbnail_key?: string | null
@@ -189,6 +193,8 @@ export interface Database {
           captured_at_local?: string | null
           captured_at_offset?: string | null
           captured_at_source?: string | null
+          captured_at_user?: string | null
+          captured_at_confidence?: string | null
           favorite?: boolean
           rating?: number | null
           thumbnail_key?: string | null
@@ -600,6 +606,20 @@ export interface Database {
         Args: Record<string, never>
         Returns: boolean
       }
+      vault_private_access: { Args: Record<string, never>; Returns: boolean }
+      vault_lock_status: { Args: Record<string, never>; Returns: Record<string, unknown> }
+      vault_create_pin: { Args: { p_pin: string }; Returns: Record<string, unknown> }
+      vault_unlock_pin: { Args: { p_pin: string }; Returns: Record<string, unknown> }
+      vault_lock_now: { Args: Record<string, never>; Returns: boolean }
+      vault_change_pin: { Args: { p_current: string; p_next: string }; Returns: Record<string, unknown> }
+      vault_recover_pin: { Args: { p_code: string; p_next: string }; Returns: Record<string, unknown> }
+      vault_set_breakin: { Args: { p_enabled: boolean }; Returns: boolean }
+      vault_record_breakin: { Args: { p_status: string; p_user_agent: string; p_image: string | null }; Returns: string }
+      vault_breakin_history: {
+        Args: Record<string, never>
+        Returns: { id: string; created_at: string; capture_status: string; user_agent: string | null; image_base64: string | null }[]
+      }
+      vault_delete_breakin: { Args: { p_id: string }; Returns: boolean }
     }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>

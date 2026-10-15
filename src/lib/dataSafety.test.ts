@@ -108,7 +108,8 @@ describe('data-safety source contracts', () => {
 
   it('always renders Created separately from Uploaded and keeps Created visible when unknown', () => {
     const src = readFileSync(join(root, 'src/components/files/MediaDetailsSheet.tsx'), 'utf8')
-    expect(src).toContain("{ label: 'Original creation', value: fmtCaptured(file) }")
+    expect(src).toContain("label: 'Original Created'")
+    expect(src).toContain('displayOriginalInstant')
     expect(src).toContain("{ label: 'Uploaded to Vault', value: fmtDate(file.created_at) }")
     expect(src).toContain("file.captured_at_source === 'file_last_modified'")
     expect(src).toContain("return 'Unknown'")

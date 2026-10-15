@@ -28,5 +28,26 @@ export async function requireAuthenticatedUser(req) {
     throw err
   }
 
+  await assertPrivateAccess(url, anonKey, token)
   return { user: data.user, accessToken: token }
+}
+
+async function assertPrivateAccess(url, anonKey, token) {
+  const supabase = createClient(url, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  const { data, error } = await supabase.rpc('vault_private_access')
+  if (error) {
+    const msg = String(error.message || error.code || '')
+    if (/could not find the function|PGRST202|schema cache/i.test(msg)) return
+    const err = new Error('Vault lock check failed')
+    err.statusCode = 503
+    throw err
+  }
+  if (data !== true) {
+    const err = new Error('Vault is locked')
+    err.statusCode = 423
+    throw err
+  }
 }
