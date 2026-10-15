@@ -11,6 +11,8 @@ import { setFilesLocked } from '../lib/locks'
 import { classifyFileKind } from '../lib/fileKind'
 import { fetchAlbumsWithCounts } from '../lib/albumQueries'
 import { listTags, addTagsToFiles, removeTagsFromFiles } from '../lib/tags'
+import { withLockedTag } from '../lib/libraryFilters'
+import { createAlbumFromGroup } from '../lib/smartAlbums'
 import { addFilesToAlbum, setFavorite, setRating } from '../lib/albumMembership'
 import {
   attachFileForResume,
@@ -49,6 +51,9 @@ export function Library() {
   const { showToast } = useToast()
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const groupTag = params.get('group') === '1' ? params.get('tag') : null
+  const groupTitle = params.get('title') || 'Name'
+  const smartGroup = params.get('smart') === '1'
   const { setSelectedFileIds } = useMediaSelection()
   const [filters, setFilters] = useState(() => {
     const tag = params.get('tag')
@@ -186,16 +191,45 @@ export function Library() {
     }
   }
 
+  function updateFilters(next: typeof filters) {
+    setFilters(withLockedTag(next, groupTag))
+  }
+
+  async function createGroupAlbum(mode: 'normal' | 'smart') {
+    if (!user || !groupTag) return
+    const albumName = window.prompt(mode === 'smart' ? 'Smart album name' : 'Album name', groupTitle)
+    if (!albumName?.trim()) return
+    try {
+      const album = await createAlbumFromGroup(user.id, { name: albumName, tagId: groupTag, mode })
+      if (mode === 'smart') {
+        showToast('Smart album created. New files with this name show up automatically.')
+        return
+      }
+      showToast(`Album created with ${album.added} files`)
+      navigate(`/albums/${album.id}`)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Could not create album', 'error')
+    }
+  }
+
   return (
     <div className="dashboard">
       <main className="dashboard__main">
         <div className="dashboard__toolbar">
           <div>
-            <h1 className="dashboard__title">Library</h1>
+            <h1 className="dashboard__title">{groupTag ? groupTitle : 'Library'}</h1>
                 <p className="dashboard__subtitle">
-              All media · <a href="/names">Names</a> · <a href="/deleted">Recently Deleted</a>
+              {groupTag
+                ? <>{smartGroup ? 'Smart album' : 'Name group'} · <a href="/names">All names</a></>
+                : <>All media · <a href="/names">Names</a> · <a href="/deleted">Recently Deleted</a></>}
             </p>
           </div>
+          {groupTag ? (
+            <>
+              <button type="button" className="btn btn--outline" onClick={() => void createGroupAlbum('normal')}>Album</button>
+              <button type="button" className="btn btn--outline" onClick={() => void createGroupAlbum('smart')}>Smart album</button>
+            </>
+          ) : null}
           <label className="btn btn--primary">
             Upload
             <input
@@ -233,7 +267,7 @@ export function Library() {
             Add Links
           </button>
         </div>
-        <FilterBar filters={filters} onChange={setFilters} tags={tags} albums={albums} />
+        <FilterBar filters={filters} onChange={updateFilters} tags={tags} albums={albums} />
         <BulkActionBar
           count={selected.size}
           albums={albums}

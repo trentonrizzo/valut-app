@@ -53,6 +53,7 @@ export interface Database {
           order_index: number
           cover_file_id: string | null
           is_protected: boolean
+          smart_tag_id: string | null
         }
         Insert: {
           id?: string
@@ -62,6 +63,7 @@ export interface Database {
           order_index?: number
           cover_file_id?: string | null
           is_protected?: boolean
+          smart_tag_id?: string | null
         }
         Update: {
           id?: string
@@ -71,6 +73,7 @@ export interface Database {
           order_index?: number
           cover_file_id?: string | null
           is_protected?: boolean
+          smart_tag_id?: string | null
         }
         Relationships: [
           {
@@ -107,6 +110,7 @@ export interface Database {
           captured_at_source: string | null
           captured_at_user: string | null
           captured_at_confidence: string | null
+          original_at: string | null
           favorite: boolean
           rating: number | null
           thumbnail_key: string | null
@@ -151,6 +155,7 @@ export interface Database {
           captured_at_source?: string | null
           captured_at_user?: string | null
           captured_at_confidence?: string | null
+          original_at?: string | null
           favorite?: boolean
           rating?: number | null
           thumbnail_key?: string | null
@@ -195,6 +200,7 @@ export interface Database {
           captured_at_source?: string | null
           captured_at_user?: string | null
           captured_at_confidence?: string | null
+          original_at?: string | null
           favorite?: boolean
           rating?: number | null
           thumbnail_key?: string | null

@@ -524,6 +524,17 @@ export function Dashboard() {
     return albums.find((a) => a.id === openAlbumId) ?? null
   }, [albums, openAlbumId])
 
+  useEffect(() => {
+    if (!openAlbum?.smart_tag_id) return
+    const params = new URLSearchParams({
+      tag: openAlbum.smart_tag_id,
+      title: openAlbum.name,
+      group: '1',
+      smart: '1',
+    })
+    navigate(`/library?${params.toString()}`, { replace: true })
+  }, [openAlbum?.id, openAlbum?.smart_tag_id, openAlbum?.name, navigate])
+
   const rootAlbums = useMemo(() => albums.filter((a) => !a.parent_album_id), [albums])
 
   const childAlbums = useMemo(() => {
@@ -639,6 +650,7 @@ export function Dashboard() {
       order_index: nextOrder,
       cover_file_id: null,
       is_protected: false,
+      smart_tag_id: null,
       parent_album_id: parentId,
       childCount: 0,
     }

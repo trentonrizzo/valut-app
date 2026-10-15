@@ -121,6 +121,17 @@ export async function fetchAlbumsWithCounts(userId: string) {
     }
   })
 
+  const smartIds = albumRows.map((album) => album.smart_tag_id).filter((id): id is string => Boolean(id))
+  if (smartIds.length > 0) {
+    const { data: links } = await supabase.from('file_tags').select('tag_id').eq('user_id', userId).in('tag_id', smartIds)
+    const byTag = new Map<string, number>()
+    for (const link of links ?? []) byTag.set(link.tag_id, (byTag.get(link.tag_id) ?? 0) + 1)
+    for (const album of data) {
+      if (!album.smart_tag_id) continue
+      album.itemCount = byTag.get(album.smart_tag_id) ?? 0
+    }
+  }
+
   return { data, error: null as string | null }
 }
 

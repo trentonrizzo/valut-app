@@ -21,6 +21,12 @@ export function advancedFilterCount(filters: MediaFilters): number {
   return n
 }
 
+export function withLockedTag(filters: MediaFilters, lockTagId: string | null | undefined): MediaFilters {
+  if (!lockTagId) return filters
+  if (filters.tagIds.includes(lockTagId)) return filters
+  return { ...filters, tagIds: [lockTagId, ...filters.tagIds] }
+}
+
 export function clearAdvancedFilters(filters: MediaFilters): MediaFilters {
   return {
     ...DEFAULT_MEDIA_FILTERS,

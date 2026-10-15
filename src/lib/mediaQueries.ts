@@ -61,6 +61,8 @@ export async function listMediaPage(opts: {
   signal?: AbortSignal
   fileIds?: string[]
   idsOnly?: boolean
+  /** Internal retry when original_at has not been added yet. */
+  captureFallback?: boolean
 }): Promise<{ rows: FileRow[]; nextCursor: PageCursor | null }> {
   const limit = opts.limit ?? PAGE_SIZE
   const f = opts.filters
@@ -74,7 +76,10 @@ export async function listMediaPage(opts: {
     else embeds.push('tag_any:file_tags!inner()')
   }
   if (v11 && qSearch) embeds.push('tag_search:file_tags(tags!inner())')
-  const fields = opts.idsOnly ? 'id,created_at,captured_at,width,file_size_bytes,duration_ms,rating,favorite' : '*'
+  const captureSort = f.sort === 'newest_captured' || f.sort === 'oldest_captured'
+  const fields = opts.idsOnly
+    ? `id,created_at,captured_at,captured_at_user,${captureSort && !opts.captureFallback ? 'original_at,' : ''}width,file_size_bytes,duration_ms,rating,favorite`
+    : '*'
   let q = supabase.from('files').select([fields, ...embeds].join(',')).eq('user_id', opts.userId)
   if (v11 && f.albumId) {
     q = q.eq('album_match.album_id', f.albumId).eq('album_match.user_id', opts.userId)
@@ -143,6 +148,9 @@ export async function listMediaPage(opts: {
     if (!v11 && ['captured_at', 'duration_ms', 'width', 'rating', 'favorite'].includes(requested.col)) {
       return sortColumn('newest_upload')
     }
+    if (requested.col === 'captured_at' && !opts.captureFallback) {
+      return { ...requested, col: 'original_at' }
+    }
     return requested
   })()
   const cursor = opts.cursor
@@ -154,7 +162,12 @@ export async function listMediaPage(opts: {
 
   if (opts.signal) q = q.abortSignal(opts.signal)
   const { data, error } = await q
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (col === 'original_at' && /original_at|schema cache|column/i.test(error.message)) {
+      return listMediaPage({ ...opts, captureFallback: true })
+    }
+    throw new Error(error.message)
+  }
   const rows = (data as unknown as FileRow[]) ?? []
   const hasMore = rows.length > limit
   const page = hasMore ? rows.slice(0, limit) : rows
@@ -173,7 +186,13 @@ export async function listMediaPage(opts: {
       id: last.id,
       num,
     }
-    if (col === 'captured_at') nextCursor.ts = last.captured_at
+    if (col === 'captured_at' || col === 'original_at') {
+      const instant = col === 'original_at'
+        ? (last as FileRow & { original_at?: string | null }).original_at
+        : last.captured_at
+      nextCursor.ts = instant ?? null
+      nextCursor.value = instant ?? null
+    }
   }
   return { rows: page, nextCursor }
 }

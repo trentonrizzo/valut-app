@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
-import { detectPersonName } from '../lib/nameTag'
+import { detectPersonName, detectSourceSite, sortNameGroups, type NameGroupSort } from '../lib/nameTag'
 import { backfillNameTagsBatch, type NameBackfillCursor } from '../lib/nameTagApply'
+import { createAlbumFromGroup, type GroupAlbumMode } from '../lib/smartAlbums'
 import { listTags, mergeTags, renameTag } from '../lib/tags'
 import { supabase } from '../lib/supabase'
 
@@ -22,19 +23,29 @@ function loadCursor(userId: string): NameBackfillCursor {
   return { createdAt: null, id: null, done: false }
 }
 
+function groupHref(tag: { id: string; name: string }) {
+  const params = new URLSearchParams({ tag: tag.id, title: tag.name, group: '1' })
+  return `/library?${params.toString()}`
+}
+
 export function NamesPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [tags, setTags] = useState<TagRow[]>([])
+  const [sources, setSources] = useState<TagRow[]>([])
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [q, setQ] = useState('')
+  const [sort, setSort] = useState<NameGroupSort>('count')
   const [scanNonce, setScanNonce] = useState(0)
   const [notice, setNotice] = useState('Looking for names in filenames…')
 
   async function refresh() {
     if (!user) return []
     const rows = await listTags(user.id)
-    const names = rows.filter((tag) => tag.kind === 'name' || detectPersonName({ filename: tag.name }) === tag.name)
+    const names = rows.filter((tag) => tag.kind === 'name' || (tag.kind !== 'source' && detectPersonName({ filename: tag.name }) === tag.name))
+    const sites = rows.filter((tag) => tag.kind === 'source' || (tag.kind !== 'name' && detectSourceSite({ filename: tag.name }) === tag.name))
     setTags(names)
+    setSources(sites)
     const map: Record<string, number> = {}
     const { data: ft } = await supabase.from('file_tags').select('tag_id').eq('user_id', user.id)
     for (const row of ft || []) map[row.tag_id] = (map[row.tag_id] || 0) + 1
@@ -72,12 +83,14 @@ export function NamesPage() {
     return () => { cancel = true }
   }, [user?.id, scanNonce])
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    const rows = [...tags].sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0) || a.name.localeCompare(b.name))
-    if (!needle) return rows
-    return rows.filter((tag) => tag.name.toLowerCase().includes(needle))
-  }, [tags, q, counts])
+  const filtered = useMemo(
+    () => sortNameGroups(tags.map((tag) => ({ ...tag, count: counts[tag.id] || 0 })), sort, q),
+    [tags, q, counts, sort],
+  )
+  const filteredSources = useMemo(
+    () => sortNameGroups(sources.map((tag) => ({ ...tag, count: counts[tag.id] || 0 })), sort, q),
+    [sources, q, counts, sort],
+  )
 
   async function onRename(tag: TagRow) {
     if (!user) return
@@ -85,6 +98,22 @@ export function NamesPage() {
     if (!next || next.trim() === tag.name) return
     await renameTag(user.id, tag.id, next)
     await refresh()
+  }
+
+  async function onCreateAlbum(tag: TagRow, mode: GroupAlbumMode) {
+    if (!user) return
+    const albumName = window.prompt(mode === 'smart' ? 'Smart album name' : 'Album name', tag.name)
+    if (!albumName?.trim()) return
+    try {
+      const album = await createAlbumFromGroup(user.id, { name: albumName, tagId: tag.id, mode })
+      if (mode === 'smart') {
+        setNotice(`Smart album “${album.name}” follows this name.`)
+        return
+      }
+      navigate(`/albums/${album.id}`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not create album')
+    }
   }
 
   async function onMerge(tag: TagRow) {
@@ -106,6 +135,10 @@ export function NamesPage() {
       </header>
       <div className="row">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search names" aria-label="Search names" />
+        <select aria-label="Sort groups" value={sort} onChange={(event) => setSort(event.target.value as NameGroupSort)}>
+          <option value="count">File count</option>
+          <option value="name">Alphabetical</option>
+        </select>
         <button
           type="button"
           className="btn btn--ghost"
@@ -120,14 +153,29 @@ export function NamesPage() {
       <ul className="tag-manager-list">
         {filtered.map((tag) => (
           <li key={tag.id} className="tag-manager-list__item">
-            <Link to={`/library?tag=${tag.id}`} className="tag-chip">{tag.name}</Link>
-            <span className="muted">{counts[tag.id] || 0}</span>
+            <Link to={groupHref(tag)} className="tag-chip">{tag.name}</Link>
+            <span className="muted">{tag.count}</span>
             <button type="button" className="btn btn--ghost" onClick={() => void onRename(tag)}>Rename</button>
             <button type="button" className="btn btn--ghost" onClick={() => void onMerge(tag)}>Merge</button>
+            <button type="button" className="btn btn--ghost" onClick={() => void onCreateAlbum(tag, 'normal')}>Album</button>
+            <button type="button" className="btn btn--ghost" onClick={() => void onCreateAlbum(tag, 'smart')}>Smart album</button>
           </li>
         ))}
       </ul>
       {!filtered.length ? <p className="muted">No recognizable names yet.</p> : null}
+      {filteredSources.length ? (
+        <>
+          <h2>Sources</h2>
+          <ul className="tag-manager-list">
+            {filteredSources.map((tag) => (
+              <li key={tag.id} className="tag-manager-list__item">
+                <Link to={groupHref(tag)} className="tag-chip">{tag.name}</Link>
+                <span className="muted">{tag.count}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </div>
   )
 }

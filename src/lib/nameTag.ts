@@ -114,6 +114,65 @@ function titleCase(tokens: string[]): string {
   }).join(' ')
 }
 
+const SOURCE_SITES: [RegExp, string][] = [
+  [/\bonlyfans\b/i, 'OnlyFans'],
+  [/\bfansly\b/i, 'Fansly'],
+  [/\binstagram\b/i, 'Instagram'],
+  [/\btiktok\b/i, 'TikTok'],
+  [/\byoutube\b/i, 'YouTube'],
+  [/\btwitter\b|\bx\.com\b/i, 'X'],
+  [/\breddit\b/i, 'Reddit'],
+  [/\btelegram\b/i, 'Telegram'],
+  [/\bwhatsapp\b/i, 'WhatsApp'],
+  [/\bdiscord\b/i, 'Discord'],
+  [/\bpornhub\b/i, 'Pornhub'],
+  [/\bxvideos\b/i, 'Xvideos'],
+  [/\bxhamster\b/i, 'Xhamster'],
+  [/\bchaturbate\b/i, 'Chaturbate'],
+  [/\bmanyvids\b/i, 'ManyVids'],
+]
+
+/** A recognizable site label from a filename or source URL. Not a person. */
+export function detectSourceSite(sources: NameSources): string | null {
+  const haystack = [sources.filename, sources.alternateFilename, sources.title, sources.sourceUrl].map(text).filter(Boolean).join(' ')
+  if (!haystack) return null
+  for (const [pattern, label] of SOURCE_SITES) {
+    if (pattern.test(haystack)) return label
+  }
+  const host = hostFromUrl(sources.sourceUrl)
+  if (!host) return null
+  for (const [pattern, label] of SOURCE_SITES) {
+    if (pattern.test(host)) return label
+  }
+  return null
+}
+
+export type NameGroupSort = 'name' | 'count'
+
+/** Keep groups of one or two files. Hide only empty tags. */
+export function sortNameGroups<T extends { name: string; count: number }>(
+  rows: T[],
+  sort: NameGroupSort,
+  query = '',
+): T[] {
+  const needle = query.trim().toLowerCase()
+  const visible = rows.filter((row) => row.count >= 1 && (!needle || row.name.toLowerCase().includes(needle)))
+  return visible.sort((a, b) => {
+    if (sort === 'name') return a.name.localeCompare(b.name) || b.count - a.count
+    return b.count - a.count || a.name.localeCompare(b.name)
+  })
+}
+
+function hostFromUrl(sourceUrl: string | null | undefined): string {
+  const raw = text(sourceUrl)
+  if (!raw) return ''
+  try {
+    return new URL(raw).hostname
+  } catch {
+    return ''
+  }
+}
+
 function text(value: string | null | undefined): string {
   return String(value || '').trim()
 }

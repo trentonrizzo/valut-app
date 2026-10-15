@@ -121,7 +121,7 @@ export function AlbumCard({
         </h2>
         <div className="album-card__stats" aria-label="Album size and item count">
           <span className="album-card__stats-line">
-            {formatItemCount(album.itemCount)}
+            {album.smart_tag_id ? 'Smart · ' : ''}{formatItemCount(album.itemCount)}
             {(album.childCount ?? 0) > 0 ? (
               <>
                 {' '}
