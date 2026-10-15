@@ -28,6 +28,7 @@ import { fileConcurrency, isIosDevice, partConcurrency, partGapMs, putWithRetry,
 import { getPreferredUploadMode, normalizeUploadMode, setPreferredUploadMode, type UploadMode } from './uploadMode'
 import { extractBoundedMediaMetadata, extractMediaMetadata, makeImageThumbnail, makeVideoPoster } from './extractMetadata'
 import { sha256HexOfFileBestEffort } from './contentHash'
+import { applyDetectedNameTag } from '../nameTagApply'
 import {
   canCatalogReady,
   canFinalizeWithoutFile,
@@ -805,6 +806,15 @@ async function finalizeCatalog(
     job.albumComplete = true
   } else {
     job.albumComplete = true
+  }
+
+  try {
+    await applyDetectedNameTag(userId, job.objectId, {
+      filename: job.originalFilename,
+      alternateFilename: job.fileName,
+    })
+  } catch {
+    /* A name tag is optional. The uploaded original is already stored. */
   }
 }
 

@@ -769,7 +769,7 @@ export function Dashboard() {
               <div>
                 <h1 className="dashboard__title">Albums</h1>
                 <p className="dashboard__subtitle">
-                  {loading ? 'Loading…' : albumCountLabel} · Tap an album to open it
+                  {loading ? 'Loading…' : albumCountLabel} · <a href="/names">Names</a>
                 </p>
               </div>
               <div className="dashboard__toolbar-actions">

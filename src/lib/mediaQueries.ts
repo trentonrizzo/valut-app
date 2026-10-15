@@ -133,7 +133,9 @@ export async function listMediaPage(opts: {
     if (d) q = q.ilike('source_url', `%${d}%`)
   }
   if (qSearch) {
-    q = v11 ? q.or(`file_name.ilike.%${qSearch}%,tag_search.not.is.null`) : q.ilike('file_name', `%${qSearch}%`)
+    q = v11
+      ? q.or(`file_name.ilike.%${qSearch}%,original_filename.ilike.%${qSearch}%,description.ilike.%${qSearch}%,tag_search.not.is.null`)
+      : q.ilike('file_name', `%${qSearch}%`)
   }
 
   const { col, ascending, extra } = (() => {

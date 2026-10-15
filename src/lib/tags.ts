@@ -45,6 +45,20 @@ export async function renameTag(userId: string, tagId: string, rawName: string) 
   if (error) throw new Error(error.message)
 }
 
+export async function mergeTags(userId: string, sourceId: string, targetId: string) {
+  if (sourceId === targetId) return
+  const { data, error } = await supabase
+    .from('file_tags')
+    .select('file_id')
+    .eq('user_id', userId)
+    .eq('tag_id', sourceId)
+  if (error) throw new Error(error.message)
+  const fileIds = (data ?? []).map((row) => row.file_id)
+  if (fileIds.length) await addTagsToFiles(userId, fileIds, [targetId])
+  if (fileIds.length) await removeTagsFromFiles(userId, fileIds, [sourceId])
+  await deleteTag(userId, sourceId)
+}
+
 export async function deleteTag(userId: string, tagId: string) {
   const { error } = await supabase.from('tags').delete().eq('id', tagId).eq('user_id', userId)
   if (error) throw new Error(error.message)

@@ -193,7 +193,7 @@ export function Library() {
           <div>
             <h1 className="dashboard__title">Library</h1>
                 <p className="dashboard__subtitle">
-              All media · <a href="/deleted">Recently Deleted</a>
+              All media · <a href="/names">Names</a> · <a href="/deleted">Recently Deleted</a>
             </p>
           </div>
           <label className="btn btn--primary">

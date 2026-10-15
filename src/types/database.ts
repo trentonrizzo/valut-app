@@ -262,6 +262,7 @@ export interface Database {
           user_id: string
           name: string
           name_normalized: string
+          kind: string | null
           created_at: string
         }
         Insert: {
@@ -269,6 +270,7 @@ export interface Database {
           user_id: string
           name: string
           name_normalized: string
+          kind?: string | null
           created_at?: string
         }
         Update: {
@@ -276,6 +278,7 @@ export interface Database {
           user_id?: string
           name?: string
           name_normalized?: string
+          kind?: string | null
           created_at?: string
         }
         Relationships: []
