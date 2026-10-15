@@ -52,6 +52,7 @@ export function nameFromLabel(raw: string): string | null {
     .replace(/https?:\/\/\S+/gi, ' ')
     .replace(/\b[\w-]+\.(com|net|org|io|tv|me|co|xxx)\b/gi, ' ')
     .replace(/[_.]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[()[\]{}]/g, ' ')
   const segments = cleaned.split(/\s+[-–—|]\s+|\s{2,}/).map((part) => part.trim()).filter(Boolean)
   const found = new Set<string>()
@@ -77,12 +78,17 @@ function nameFromSourceUrl(sourceUrl: string | null | undefined): string | null 
 }
 
 function nameFromSegment(segment: string): string | null {
-  const tokens = segment.split(/\s+/).map((token) => token.trim()).filter(Boolean)
+  const tokens = segment.split(/\s+/).map((token) => softenToken(token.trim())).filter(Boolean)
   while (tokens.length && isNoise(tokens[0])) tokens.shift()
   while (tokens.length && isNoise(tokens[tokens.length - 1])) tokens.pop()
   if (tokens.length < 2 || tokens.length > 3) return null
   if (!tokens.every((token, index) => isNameToken(token, index, tokens.length))) return null
   return titleCase(tokens)
+}
+
+function softenToken(token: string): string {
+  const match = token.match(/^([A-Za-z](?:[A-Za-z]|['’][A-Za-z]|-[A-Za-z])*)(\d{1,4})$/)
+  return match ? match[1] : token
 }
 
 function isNoise(token: string): boolean {

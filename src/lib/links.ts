@@ -2,6 +2,8 @@
 import { supabase } from './supabase'
 import { displayDomain, normalizeSafeHttpUrl, type ParsedLink } from './linkParser'
 import { providerForUrl } from './linkMetadata'
+import { detectPersonName, detectSourceSite } from './nameTag'
+import { createTaggedLabel } from './nameTagApply'
 
 export type VaultLink = {
   id: string
@@ -85,7 +87,9 @@ export async function createLink(userId: string, input: { url: string; title?: s
   }
   const { data, error } = await supabase.from('vault_links').insert(row).select('*').single()
   if (error) throw new Error(error.message)
-  return data as VaultLink
+  const link = data as VaultLink
+  await classifySavedLink(userId, link)
+  return link
 }
 
 export async function importLinks(userId: string, rows: ParsedLink[], options: { albumId?: string | null; tagIds?: string[]; importExistingDuplicates?: boolean }): Promise<LinkImportResult> {
@@ -131,6 +135,28 @@ export async function updateLink(userId: string, id: string, patch: Partial<Pick
   }
   const { error } = await supabase.from('vault_links').update(next).eq('id', id).eq('user_id', userId)
   if (error) throw new Error(error.message)
+  if (patch.title != null || patch.url != null) {
+    const { data } = await supabase.from('vault_links').select('*').eq('id', id).eq('user_id', userId).maybeSingle()
+    if (data) await classifySavedLink(userId, data as VaultLink)
+  }
+}
+
+export async function classifySavedLink(userId: string, link: Pick<VaultLink, 'id' | 'title' | 'automatic_title' | 'url'>): Promise<void> {
+  try {
+    const sources = { title: link.title || link.automatic_title, filename: link.title || link.automatic_title, sourceUrl: link.url }
+    const name = detectPersonName(sources)
+    const source = detectSourceSite(sources)
+    if (name) {
+      const tag = await createTaggedLabel(userId, name, 'name')
+      await addTagsToLinks(userId, [link.id], [tag.id])
+    }
+    if (source) {
+      const tag = await createTaggedLabel(userId, source, 'source')
+      await addTagsToLinks(userId, [link.id], [tag.id])
+    }
+  } catch {
+    /* A name label is optional. The saved link already exists. */
+  }
 }
 
 export async function addLinkToAlbum(userId: string, albumId: string, linkId: string): Promise<void> {

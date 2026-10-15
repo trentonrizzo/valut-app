@@ -63,68 +63,143 @@ export async function createTaggedLabel(userId: string, rawName: string, kind: '
   return plain.data
 }
 
-export type NameBackfillCursor = { createdAt: string | null; id: string | null; done: boolean }
+export type NameBackfillCursor = { phase: 'files' | 'links'; offset: number; done: boolean }
+
+export const GROUP_INDEX_KEY = 'vault-group-index-v2'
+
+export function resetGroupIndex(userId: string) {
+  localStorage.removeItem(`${GROUP_INDEX_KEY}:${userId}`)
+}
+
+const FILE_COLUMNS = [
+  'id, file_name, original_filename, source_url, description, created_at, purpose, mime_type',
+  'id, file_name, original_filename, source_url, created_at, purpose, mime_type',
+  'id, file_name, created_at, purpose, mime_type',
+]
 
 export async function backfillNameTagsBatch(
   userId: string,
   cursor: NameBackfillCursor,
   limit = 80,
 ): Promise<{ scanned: number; tagged: number; names: number; cursor: NameBackfillCursor }> {
-  let query = supabase
-    .from('files')
-    .select('id, file_name, original_filename, source_url, description, created_at, purpose')
+  if (cursor.phase === 'links') return backfillLinksBatch(userId, cursor, limit)
+  let lastError = 'Could not read filenames'
+  for (const columns of FILE_COLUMNS) {
+    const { data, error } = await supabase
+      .from('files')
+      .select(columns)
+      .eq('user_id', userId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(cursor.offset, cursor.offset + limit - 1)
+    if (error) {
+      lastError = error.message
+      if (/column|schema cache|does not exist/i.test(error.message)) continue
+      throw new Error(error.message)
+    }
+    const rows = (data ?? []) as unknown as {
+      id: string
+      file_name?: string | null
+      original_filename?: string | null
+      source_url?: string | null
+      description?: string | null
+      purpose?: string | null
+    }[]
+    const tagged = await tagRows(userId, rows.map((row) => ({
+      id: row.id,
+      skip: row.purpose === 'cover',
+      sources: {
+        filename: row.original_filename,
+        alternateFilename: row.file_name,
+        title: row.description,
+        sourceUrl: row.source_url,
+      },
+      table: 'files' as const,
+    })))
+    const doneFiles = rows.length < limit
+    return {
+      scanned: rows.length,
+      tagged: tagged.linked,
+      names: tagged.names,
+      cursor: doneFiles
+        ? { phase: 'links', offset: 0, done: false }
+        : { phase: 'files', offset: cursor.offset + rows.length, done: false },
+    }
+  }
+  throw new Error(lastError)
+}
+
+async function backfillLinksBatch(userId: string, cursor: NameBackfillCursor, limit: number) {
+  const { data, error } = await supabase
+    .from('vault_links')
+    .select('id, title, automatic_title, url')
     .eq('user_id', userId)
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
-    .order('id', { ascending: true })
-    .limit(limit)
-  if (cursor.createdAt && cursor.id) {
-    query = query.or(`created_at.gt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.gt.${cursor.id})`)
+    .range(cursor.offset, cursor.offset + limit - 1)
+  if (error) {
+    if (/relation|does not exist|schema cache/i.test(error.message)) {
+      return { scanned: 0, tagged: 0, names: 0, cursor: { phase: 'links' as const, offset: cursor.offset, done: true } }
+    }
+    throw new Error(error.message)
   }
-  const { data, error } = await query
-  if (error) throw new Error(error.message)
   const rows = data ?? []
-  const groups = new Map<string, string[]>()
-  const sourcesBySite = new Map<string, string[]>()
-  for (const row of rows) {
-    if (row.purpose === 'cover') continue
-    const sources = {
-      filename: row.original_filename,
-      alternateFilename: row.file_name,
-      title: row.description,
-      sourceUrl: row.source_url,
-    }
-    const name = detectPersonName(sources)
-    if (name) {
-      const list = groups.get(name) ?? []
-      list.push(row.id)
-      groups.set(name, list)
-    }
-    const source = detectSourceSite(sources)
-    if (source) {
-      const list = sourcesBySite.get(source) ?? []
-      list.push(row.id)
-      sourcesBySite.set(source, list)
-    }
-  }
-  let tagged = 0
-  for (const [name, fileIds] of groups) {
-    const tag = await createTaggedLabel(userId, name, 'name')
-    tagged += await addTagsToFiles(userId, fileIds, [tag.id])
-  }
-  for (const [source, fileIds] of sourcesBySite) {
-    const tag = await createTaggedLabel(userId, source, 'source')
-    tagged += await addTagsToFiles(userId, fileIds, [tag.id])
-  }
-  const last = rows[rows.length - 1]
+  const tagged = await tagRows(userId, rows.map((row) => ({
+    id: row.id,
+    skip: false,
+    sources: {
+      title: row.title || row.automatic_title,
+      filename: row.title || row.automatic_title,
+      sourceUrl: row.url,
+    },
+    table: 'links' as const,
+  })))
   return {
     scanned: rows.length,
-    tagged,
-    names: groups.size,
+    tagged: tagged.linked,
+    names: tagged.names,
     cursor: {
-      createdAt: last?.created_at ?? cursor.createdAt,
-      id: last?.id ?? cursor.id,
+      phase: 'links' as const,
+      offset: cursor.offset + rows.length,
       done: rows.length < limit,
     },
   }
+}
+
+async function tagRows(
+  userId: string,
+  rows: { id: string; skip: boolean; sources: NameSources; table: 'files' | 'links' }[],
+) {
+  const names = new Map<string, { files: string[]; links: string[] }>()
+  const sites = new Map<string, { files: string[]; links: string[] }>()
+  for (const row of rows) {
+    if (row.skip) continue
+    const bucket = row.table === 'files' ? 'files' : 'links'
+    const name = detectPersonName(row.sources)
+    if (name) {
+      const group = names.get(name) ?? { files: [], links: [] }
+      group[bucket].push(row.id)
+      names.set(name, group)
+    }
+    const source = detectSourceSite(row.sources)
+    if (source) {
+      const group = sites.get(source) ?? { files: [], links: [] }
+      group[bucket].push(row.id)
+      sites.set(source, group)
+    }
+  }
+  let linked = 0
+  for (const [label, group] of [...names, ...sites]) {
+    const kind = names.has(label) ? 'name' : 'source'
+    const tag = await createTaggedLabel(userId, label, kind)
+    if (group.files.length) linked += await addTagsToFiles(userId, group.files, [tag.id])
+    if (group.links.length) {
+      const rows = group.links.map((link_id) => ({ user_id: userId, link_id, tag_id: tag.id }))
+      const { error } = await supabase.from('link_tags').upsert(rows, { onConflict: 'link_id,tag_id', ignoreDuplicates: true })
+      if (error && !/relation|does not exist|schema cache/i.test(error.message)) throw new Error(error.message)
+      if (!error) linked += rows.length
+    }
+  }
+  return { linked, names: names.size }
 }

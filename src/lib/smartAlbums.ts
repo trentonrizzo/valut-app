@@ -2,6 +2,7 @@ import { supabase } from './supabase'
 import { addFilesToAlbum } from './albumMembership'
 import { listAllMatchingFileIds } from './mediaQueries'
 import { addTagsToAlbums } from './tags'
+import { addLinkToAlbum, listLinks } from './links'
 import { DEFAULT_MEDIA_FILTERS } from '../types/media'
 
 export type GroupAlbumMode = 'normal' | 'smart'
@@ -45,5 +46,7 @@ export async function createAlbumFromGroup(
     filters: { ...DEFAULT_MEDIA_FILTERS, tagIds: [input.tagId], tagMode: 'and' },
   })
   await addFilesToAlbum(userId, data.id, fileIds)
-  return { id: data.id, name: data.name, mode: 'normal', added: fileIds.length }
+  const links = await listLinks(userId, { tagIds: [input.tagId], tagMode: 'or' })
+  for (const link of links) await addLinkToAlbum(userId, data.id, link.id)
+  return { id: data.id, name: data.name, mode: 'normal', added: fileIds.length + links.length }
 }

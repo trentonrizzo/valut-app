@@ -4151,3 +4151,156 @@ button {
 @media (max-width: 380px) {
   .pin-lock__key { height: 3.4rem; }
 }
+
+.smart-groups-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0 0 0.9rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 16px;
+  text-decoration: none;
+  color: inherit;
+  background: linear-gradient(180deg, #1a1524, #121018);
+  border: 1px solid rgba(167, 139, 250, 0.28);
+}
+.smart-groups-entry strong { display: block; font-size: 1rem; letter-spacing: -0.02em; }
+.smart-groups-entry small { color: #c4b5fd; font-size: 0.78rem; }
+.smart-groups-entry__mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(139, 92, 246, 0.28);
+  color: #ddd6fe;
+  font-size: 1.1rem;
+}
+
+.groups-page {
+  display: grid;
+  gap: 0.75rem;
+  width: min(100%, 920px);
+  margin: 0 auto;
+  padding: 0.85rem 0.9rem 0.5rem;
+}
+.groups-page__head h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+.groups-page__head p { margin: 0.15rem 0 0; color: var(--text-muted); font-size: 0.84rem; }
+.groups-switch {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: 999px;
+  background: #141218;
+  border: 1px solid rgba(167, 139, 250, 0.22);
+}
+.groups-switch button {
+  flex: 1;
+  min-height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #c4b5fd;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.groups-switch button.is-active { background: rgba(139, 92, 246, 0.38); color: #fff; }
+.groups-tools { display: flex; gap: 0.45rem; min-width: 0; }
+.groups-tools input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #121212;
+  color: inherit;
+  padding: 0 0.75rem;
+}
+.groups-sort { display: flex; gap: 0.3rem; }
+.groups-sort button {
+  height: 36px;
+  padding: 0 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  background: transparent;
+  color: #c4b5fd;
+  font: inherit;
+  font-size: 0.78rem;
+}
+.groups-sort button.is-active { background: rgba(139, 92, 246, 0.32); color: #fff; }
+.groups-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.65rem; }
+.group-card {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.75rem;
+  border-radius: 16px;
+  text-decoration: none;
+  color: inherit;
+  background: linear-gradient(180deg, #17151d, #101014);
+  border: 1px solid rgba(167, 139, 250, 0.18);
+}
+.group-card strong, .group-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-card strong { font-size: 1rem; letter-spacing: -0.02em; }
+.group-card small { margin-top: 0.12rem; color: var(--text-muted); font-size: 0.76rem; }
+.group-card__mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: rgba(139, 92, 246, 0.24);
+  color: #ddd6fe;
+  font-weight: 650;
+}
+.group-card__actions { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+.group-card__actions button {
+  min-height: 32px;
+  padding: 0 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: #ddd6fe;
+  font: inherit;
+  font-size: 0.75rem;
+}
+.groups-skeleton { display: grid; gap: 0.55rem; }
+.groups-skeleton span {
+  display: block;
+  height: 68px;
+  border-radius: 16px;
+  background: linear-gradient(90deg, #141218, #1c1824, #141218);
+  background-size: 200% 100%;
+  animation: groups-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes groups-shimmer { 50% { background-position: 100% 0; } }
+.groups-status, .groups-empty { margin: 0; color: var(--text-muted); font-size: 0.84rem; }
+.groups-error {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 14px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+.group-link-tile { position: relative; display: grid; }
+.group-link-tile__name {
+  position: absolute;
+  left: 0.4rem;
+  right: 0.4rem;
+  bottom: 0.4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  text-shadow: 0 1px 3px #000;
+}
+@media (min-width: 800px) {
+  .groups-list { grid-template-columns: 1fr 1fr; }
+  .groups-page__head h1 { font-size: 1.6rem; }
+}

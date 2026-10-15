@@ -56,6 +56,13 @@ export async function mergeTags(userId: string, sourceId: string, targetId: stri
   const fileIds = (data ?? []).map((row) => row.file_id)
   if (fileIds.length) await addTagsToFiles(userId, fileIds, [targetId])
   if (fileIds.length) await removeTagsFromFiles(userId, fileIds, [sourceId])
+  const links = await supabase.from('link_tags').select('link_id').eq('user_id', userId).eq('tag_id', sourceId)
+  const linkIds = (links.data ?? []).map((row) => row.link_id)
+  if (linkIds.length) {
+    const { addTagsToLinks, removeTagsFromLinks } = await import('./links')
+    await addTagsToLinks(userId, linkIds, [targetId])
+    await removeTagsFromLinks(userId, linkIds, [sourceId])
+  }
   await deleteTag(userId, sourceId)
 }
 

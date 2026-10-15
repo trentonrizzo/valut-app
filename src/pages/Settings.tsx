@@ -6,6 +6,7 @@ import { ConfirmLogoutModal } from '../components/ConfirmLogoutModal'
 import { VaultSecuritySettings } from '../components/security/VaultLockGate'
 import { lockVaultSession } from '../lib/vaultPin'
 import { Link } from 'react-router-dom'
+import { resetGroupIndex } from '../lib/nameTagApply'
 import { fetchVaultStorageStats, formatStorageLine, type VaultStorageStats } from '../lib/storageStats'
 
 type CaptureCursor = { createdAt: string | null; id: string | null; done: boolean }
@@ -148,9 +149,20 @@ export function Settings() {
             <Link className="btn btn--outline btn--block" to="/favorites">
               Favorites
             </Link>
-            <Link className="btn btn--outline btn--block" to="/names">
-              Names
+            <Link className="btn btn--outline btn--block" to="/groups">
+              Groups
             </Link>
+            <button
+              type="button"
+              className="btn btn--ghost btn--block"
+              onClick={() => {
+                if (!user) return
+                resetGroupIndex(user.id)
+                window.location.assign('/groups')
+              }}
+            >
+              Reindex groups
+            </button>
             <Link className="btn btn--outline btn--block" to="/tags">
               Tags
             </Link>

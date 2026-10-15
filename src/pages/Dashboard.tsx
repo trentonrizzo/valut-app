@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Outlet, useNavigate, useParams } from 'react-router-dom'
+import { Link, Outlet, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { useToast } from '../context/useToast'
 import { supabase } from '../lib/supabase'
@@ -781,7 +781,7 @@ export function Dashboard() {
               <div>
                 <h1 className="dashboard__title">Albums</h1>
                 <p className="dashboard__subtitle">
-                  {loading ? 'Loading…' : albumCountLabel} · <a href="/names">Names</a>
+                  {loading ? 'Loading…' : albumCountLabel}
                 </p>
               </div>
               <div className="dashboard__toolbar-actions">
@@ -815,6 +815,14 @@ export function Dashboard() {
                 <strong>Could not load albums.</strong> {fetchError}
               </div>
             ) : null}
+
+            <Link to="/groups" className="smart-groups-entry">
+              <span className="smart-groups-entry__mark" aria-hidden>✦</span>
+              <span>
+                <strong>Smart Groups</strong>
+                <small>Names, sources, and smart albums</small>
+              </span>
+            </Link>
 
             {loading ? (
               <div className="album-skeleton-grid" aria-busy="true" aria-label="Loading albums">

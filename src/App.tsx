@@ -62,6 +62,7 @@ export default function App() {
               <Route path="library/media/:fileId" element={<FullScreenMediaViewer />} />
               <Route path="tags" element={<TagsPage />} />
               <Route path="names" element={<NamesPage />} />
+              <Route path="groups" element={<NamesPage />} />
               <Route path="links" element={<LinksPage />} />
               <Route path="upload" element={<Upload />} />
               <Route path="editor" element={<Editor />} />

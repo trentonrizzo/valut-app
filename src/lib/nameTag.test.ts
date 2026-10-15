@@ -9,6 +9,9 @@ describe('person name detection', () => {
     expect(detectPersonName({ filename: 'Website - Kaylee May 182.mp4' })).toBe('Kaylee May')
     expect(detectPersonName({ filename: 'Kaylee May 039.mp4' })).toBe('Kaylee May')
     expect(nameFromLabel('kaylee_may_039.mp4')).toBe('Kaylee May')
+    expect(detectPersonName({ filename: 'Website - Kaylee Brown 182.mp4' })).toBe('Kaylee Brown')
+    expect(detectPersonName({ filename: 'Kaylee_Brown_photo4.jpg' })).toBe('Kaylee Brown')
+    expect(detectPersonName({ title: 'Kaylee Brown' })).toBe('Kaylee Brown')
   })
 
   it('strips a domain and still keeps one shared name', () => {

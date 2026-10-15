@@ -13,6 +13,8 @@ import { fetchAlbumsWithCounts } from '../lib/albumQueries'
 import { listTags, addTagsToFiles, removeTagsFromFiles } from '../lib/tags'
 import { withLockedTag } from '../lib/libraryFilters'
 import { createAlbumFromGroup } from '../lib/smartAlbums'
+import { listLinks, type VaultLink } from '../lib/links'
+import { safeOpenLink } from '../lib/linkParser'
 import { addFilesToAlbum, setFavorite, setRating } from '../lib/albumMembership'
 import {
   attachFileForResume,
@@ -54,6 +56,8 @@ export function Library() {
   const groupTag = params.get('group') === '1' ? params.get('tag') : null
   const groupTitle = params.get('title') || 'Name'
   const smartGroup = params.get('smart') === '1'
+  const [groupLinks, setGroupLinks] = useState<VaultLink[]>([])
+  const [linkOnly, setLinkOnly] = useState(false)
   const { setSelectedFileIds } = useMediaSelection()
   const [filters, setFilters] = useState(() => {
     const tag = params.get('tag')
@@ -158,6 +162,18 @@ export function Library() {
     })
   }, [user])
 
+  useEffect(() => {
+    if (!user || !groupTag) {
+      setGroupLinks([])
+      return
+    }
+    let cancel = false
+    void listLinks(user.id, { tagIds: [groupTag], tagMode: 'or' })
+      .then((links) => { if (!cancel) setGroupLinks(links) })
+      .catch(() => { if (!cancel) setGroupLinks([]) })
+    return () => { cancel = true }
+  }, [user, groupTag])
+
   const queueItems = useMemo(() => {
     void queueTick
     return liveToQueueItems(getLiveUploads())
@@ -221,7 +237,7 @@ export function Library() {
                 <p className="dashboard__subtitle">
               {groupTag
                 ? <>{smartGroup ? 'Smart album' : 'Name group'} · <a href="/names">All names</a></>
-                : <>All media · <a href="/names">Names</a> · <a href="/deleted">Recently Deleted</a></>}
+                : <>All media · <a href="/groups">Groups</a> · <a href="/deleted">Recently Deleted</a></>}
             </p>
           </div>
           {groupTag ? (
@@ -268,6 +284,14 @@ export function Library() {
           </button>
         </div>
         <FilterBar filters={filters} onChange={updateFilters} tags={tags} albums={albums} />
+        {groupTag ? (
+          <div className="groups-sort" role="group" aria-label="Show in this group">
+            <button type="button" className={!linkOnly && filters.type === 'all' ? 'is-active' : ''} onClick={() => { setLinkOnly(false); updateFilters({ ...filters, type: 'all' }) }}>All</button>
+            <button type="button" className={!linkOnly && filters.type === 'photos' ? 'is-active' : ''} onClick={() => { setLinkOnly(false); updateFilters({ ...filters, type: 'photos' }) }}>Photos</button>
+            <button type="button" className={!linkOnly && filters.type === 'videos' ? 'is-active' : ''} onClick={() => { setLinkOnly(false); updateFilters({ ...filters, type: 'videos' }) }}>Videos</button>
+            <button type="button" className={linkOnly ? 'is-active' : ''} onClick={() => setLinkOnly(true)}>Links</button>
+          </div>
+        ) : null}
         <BulkActionBar
           count={selected.size}
           albums={albums}
@@ -328,11 +352,29 @@ export function Library() {
             if (row) setDetailsFile(row)
           }}
         />
-        {loading && rows.length === 0 ? (
+        {groupTag && groupLinks.length > 0 && (linkOnly || filters.type === 'all') ? (
+          <ul className="vault-grid vault-grid--gallery">
+            {(linkOnly || filters.type === 'all' ? groupLinks : []).map((link) => (
+              <li key={link.id} className="vault-photo-item">
+                <button
+                  type="button"
+                  className="vault-photo-tile group-link-tile"
+                  onClick={() => { if (!safeOpenLink(link.url)) showToast('Only safe http/https links can be opened.', 'error') }}
+                >
+                  <div className="vault-photo-tile__media">
+                    <div className="file-kind-tile">LINK</div>
+                  </div>
+                  <span className="group-link-tile__name">{link.title || link.domain || 'Link'}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {linkOnly ? null : loading && rows.length === 0 ? (
           <div className="vault-loading">Loading library…</div>
-        ) : rows.length === 0 ? (
+        ) : linkOnly ? null : rows.length === 0 && !(groupTag && groupLinks.length > 0) ? (
           <div className="vault-empty">
-            {filters.favorite === 'yes' ? 'No favorites yet. Select media and tap Favorite.' : 'No media yet.'}
+            {filters.favorite === 'yes' ? 'No favorites yet. Select media and tap Favorite.' : groupTag ? 'No photos or videos in this group.' : 'No media yet.'}
           </div>
         ) : (
           <ul className="vault-grid vault-grid--gallery">
