@@ -63,7 +63,6 @@ export async function setVaultPin(pin: string, acceptedShortPin: boolean): Promi
   if (created.error && !/could not find the function|PGRST202|schema cache/i.test(created.error.message)) {
     throw new Error('Could not save PIN')
   }
-  if (value.length < 4) throw new Error('Shorter PINs need the security database update.')
   const { error } = await supabase.rpc('set_vault_pin', { p_pin: value })
   if (error) throw new Error('Could not save PIN')
   memoryUnlocked = false

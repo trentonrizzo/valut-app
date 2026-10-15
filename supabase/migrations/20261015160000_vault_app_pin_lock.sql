@@ -45,7 +45,7 @@ returns boolean
 language sql
 stable
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   select exists (
     select 1
@@ -61,7 +61,7 @@ returns jsonb
 language plpgsql
 stable
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   has_pin boolean;
@@ -90,7 +90,7 @@ create or replace function public.vault_create_pin(p_pin text)
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   codes text[] := array[]::text[];
@@ -122,7 +122,7 @@ create or replace function public.vault_unlock_pin(p_pin text)
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   stored text;
@@ -174,7 +174,7 @@ create or replace function public.vault_lock_now()
 returns boolean
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 begin
   if auth.uid() is null then
@@ -191,7 +191,7 @@ create or replace function public.vault_change_pin(p_current text, p_next text)
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   stored text;
@@ -221,7 +221,7 @@ create or replace function public.vault_recover_pin(p_code text, p_next text)
 returns jsonb
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   match_id uuid;
@@ -257,7 +257,7 @@ create or replace function public.vault_set_breakin(p_enabled boolean)
 returns boolean
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 begin
   if auth.uid() is null then
@@ -272,7 +272,7 @@ create or replace function public.vault_record_breakin(p_status text, p_user_age
 returns uuid
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   new_id uuid;
@@ -297,7 +297,7 @@ returns table (id uuid, created_at timestamptz, capture_status text, user_agent 
 language sql
 stable
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   select a.id, a.created_at, a.capture_status, a.user_agent, a.image_base64
   from public.vault_pin_attempts a
@@ -311,7 +311,7 @@ create or replace function public.vault_delete_breakin(p_id uuid)
 returns boolean
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 begin
   delete from public.vault_pin_attempts
@@ -325,7 +325,7 @@ create or replace function public.verify_vault_pin(p_pin text)
 returns boolean
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 declare
   result jsonb;
@@ -340,7 +340,7 @@ create or replace function public.clear_vault_pin()
 returns boolean
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 begin
   raise exception 'current pin required';
@@ -352,7 +352,7 @@ create or replace function public.set_vault_pin(p_pin text)
 returns boolean
 language plpgsql
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
 begin
   if auth.uid() is null then
