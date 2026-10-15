@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { addFilesToAlbum } from './albumMembership'
 import { listAllMatchingFileIds } from './mediaQueries'
+import { addTagsToAlbums } from './tags'
 import { DEFAULT_MEDIA_FILTERS } from '../types/media'
 
 export type GroupAlbumMode = 'normal' | 'smart'
@@ -21,14 +22,14 @@ export async function createAlbumFromGroup(
   if (input.mode === 'smart') {
     const { data, error } = await supabase
       .from('albums')
-      .insert({ user_id: userId, name, order_index: 0, smart_tag_id: input.tagId })
+      .insert({ user_id: userId, name, order_index: 0 })
       .select('id, name')
       .single()
-    if (error || !data) {
-      if (error && /smart_tag_id|schema cache|column/i.test(error.message)) {
-        throw new Error('Smart albums need the database update before they can stay in sync.')
-      }
-      throw new Error(error?.message || 'Could not create smart album')
+    if (error || !data) throw new Error(error?.message || 'Could not create smart album')
+    await addTagsToAlbums(userId, [data.id], [input.tagId])
+    const marked = await supabase.from('albums').update({ smart_tag_id: input.tagId }).eq('id', data.id).eq('user_id', userId)
+    if (marked.error && !/smart_tag_id|schema cache|column/i.test(marked.error.message)) {
+      throw new Error(marked.error.message)
     }
     return { id: data.id, name: data.name, mode: 'smart', added: 0 }
   }

@@ -64,5 +64,6 @@ describe('person name detection', () => {
     const albums = readFileSync(new URL('./smartAlbums.ts', import.meta.url), 'utf8')
     expect(albums).toContain('smart_tag_id')
     expect(albums).toContain('addFilesToAlbum')
+    expect(albums).toContain('addTagsToAlbums')
   })
 })
