@@ -64,8 +64,8 @@ export function NamesPage() {
       const names = await refresh()
       names.forEach((tag) => found.add(tag.name))
       setNotice(cursor.done
-        ? `${found.size} names`
-        : `Scanning filenames… ${scanned} checked, ${tagged} tags added`)
+        ? `${found.size} names · ${scanned} filenames checked · ${tagged} tag links written`
+        : `Scanning filenames… ${scanned} checked, ${tagged} tag links written`)
     })().catch((error) => {
       if (!cancel) setNotice(error instanceof Error ? error.message : 'Name scan failed')
     })
