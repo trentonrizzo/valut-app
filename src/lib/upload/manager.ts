@@ -37,6 +37,7 @@ import {
   displayProgress,
   fileMatchesResume,
   isImageUpload,
+  isTemporaryUploadInterruption,
   isVideoUpload,
   normalizeUploadMime,
   planUpload,
@@ -100,6 +101,7 @@ export function configureUploader(opts: { accessToken: string; userId: string; m
     window.addEventListener('online', resumeEligibleWork)
     window.addEventListener('pageshow', resumeEligibleWork)
     document.addEventListener('visibilitychange', resumeEligibleWork)
+    window.addEventListener('vault-unlocked', () => resumeInterruptedUploads())
     recoveryListenersInstalled = true
   }
 }
@@ -310,6 +312,14 @@ export function retryJob(id: string) {
 export function retryAllFailed() {
   for (const job of live.values()) {
     if (job.state === 'failed' || job.state === 'needs-file' || job.state === 'paused') retryJob(job.id)
+  }
+}
+
+export function resumeInterruptedUploads() {
+  for (const job of live.values()) {
+    if (job.state !== 'failed') continue
+    if (!isTemporaryUploadInterruption(job.error, job.errorCode)) continue
+    retryJob(job.id)
   }
 }
 

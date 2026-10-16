@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import { BottomNav } from './BottomNav'
 import { VaultAiAgent } from '../VaultAiAgent'
 import { browserCapabilities } from '../../lib/browserCapabilities'
+import { PrivacyScreen } from '../security/PrivacyScreen'
 
 export function AppShell() {
   const { pathname, search } = useLocation()
@@ -16,6 +17,7 @@ export function AppShell() {
       </div>
       {!hideBottomNav ? <BottomNav /> : null}
       {!pickerOpen && !browserCapabilities.isLegacyMode ? <VaultAiAgent /> : null}
+      <PrivacyScreen />
     </div>
   )
 }

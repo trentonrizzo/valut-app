@@ -10,6 +10,7 @@ import {
   verifyVaultPin,
 } from '../../lib/vaultPin'
 import { genericPinFailure, PIN_DOTS } from '../../lib/vaultLockPolicy'
+import { filePickerAllowsBackground, installFilePickerGrace, noteFilePickerHidden } from '../../lib/filePickerGrace'
 
 type Phase = 'checking' | 'setup' | 'locked' | 'open' | 'codes'
 
@@ -37,27 +38,35 @@ export function VaultLockGate({ children }: { children: ReactNode }) {
       setPhase((current) => (current === 'setup' || current === 'codes' ? current : 'locked'))
     }
     const onHide = () => {
-      if (document.visibilityState === 'hidden') {
-        lockVaultSession()
-        lock()
+      if (document.visibilityState !== 'hidden') return
+      if (filePickerAllowsBackground()) {
+        noteFilePickerHidden()
+        return
       }
+      lockVaultSession()
+      lock()
     }
     const onPageHide = () => {
+      if (filePickerAllowsBackground()) {
+        noteFilePickerHidden()
+        return
+      }
       lockVaultSession()
       lock()
     }
     const onShow = () => {
-      if (phaseRef.current === 'open') {
-        lockVaultSession()
-        lock()
-      }
+      if (phaseRef.current !== 'open' || filePickerAllowsBackground()) return
+      lockVaultSession()
+      lock()
     }
+    const removePickerGrace = installFilePickerGrace()
     window.addEventListener('vault-lock', lock)
     document.addEventListener('visibilitychange', onHide)
     window.addEventListener('pagehide', onPageHide)
     window.addEventListener('pageshow', onShow)
     return () => {
       cancel = true
+      removePickerGrace()
       window.removeEventListener('vault-lock', lock)
       document.removeEventListener('visibilitychange', onHide)
       window.removeEventListener('pagehide', onPageHide)
@@ -89,7 +98,10 @@ export function VaultLockGate({ children }: { children: ReactNode }) {
       {phase === 'locked' ? (
         <PinEntry
           server={server}
-          onUnlock={() => setPhase('open')}
+          onUnlock={() => {
+            setPhase('open')
+            window.dispatchEvent(new Event('vault-unlocked'))
+          }}
         />
       ) : null}
     </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { setPrivacyCover } from '../lib/privacyCover'
 
 export type UploadQueueStatus =
   | 'queued'
@@ -256,6 +257,11 @@ export function UploadQueueOverlay({
         ) : null}
 
         <div className="vault-upload-queue__footer">
+          {active ? (
+            <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={() => setPrivacyCover(true)}>
+              Hide Screen
+            </button>
+          ) : null}
           {onPauseAll && active ? (
             <button type="button" className="vault-upload-queue__dismiss btn btn--ghost" onClick={onPauseAll}>
               Pause all

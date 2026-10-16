@@ -188,6 +188,11 @@ export function canCatalogReady(job: {
   return Boolean(job.r2Verified && job.verifiedSize === expected)
 }
 
+export function isTemporaryUploadInterruption(error: string | null | undefined, errorCode: string | null | undefined): boolean {
+  const text = `${errorCode ?? ''} ${error ?? ''}`
+  return /vault is locked|423|ERR_NETWORK|failed to fetch|network request failed|load failed/i.test(text)
+}
+
 export function classifyUploadError(e: unknown, stage: string): UploadCodedError {
   if (e instanceof UploadCodedError) return e
   const msg = e instanceof Error ? e.message : String(e)

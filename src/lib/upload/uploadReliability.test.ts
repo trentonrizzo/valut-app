@@ -22,6 +22,7 @@ import {
   classifyUploadError,
   displayProgress,
   fileMatchesResume,
+  isTemporaryUploadInterruption,
   isVideoUpload,
   MAX_QUEUE_ITEMS,
   normalizeUploadMime,
@@ -99,6 +100,17 @@ describe('multipart upload success', () => {
     expect(plan.parts.at(-1)?.partNumber).toBe(plan.parts.length)
     expect(plan.parts.reduce((s, p) => s + p.bytes, 0)).toBe(25 * 1024 * 1024)
     expect(plan.parts.length).toBeLessThanOrEqual(MAX_PARTS)
+  })
+})
+
+describe('temporary upload interruptions', () => {
+  it('resumes a locked or dropped request on the same job and leaves other failures alone', () => {
+    expect(isTemporaryUploadInterruption('ERR_UPLOAD: Vault is locked', 'ERR_UPLOAD')).toBe(true)
+    expect(isTemporaryUploadInterruption('upload: browser network request failed', 'ERR_NETWORK')).toBe(true)
+    expect(isTemporaryUploadInterruption('File is empty', 'ERR_EMPTY')).toBe(false)
+    const manager = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'manager.ts'), 'utf8')
+    expect(manager).toContain('resumeInterruptedUploads')
+    expect(manager).toContain('isTemporaryUploadInterruption')
   })
 })
 

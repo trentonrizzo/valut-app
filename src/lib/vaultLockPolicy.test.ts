@@ -38,6 +38,7 @@ describe('PIN policy', () => {
     expect(screen).toContain('Enter six-digit PIN')
     expect(screen).toContain('PIN_DOTS')
     expect(screen).toContain("phase === 'open'")
+    expect(screen).toContain('filePickerAllowsBackground')
     expect(route).toContain('VaultLockGate')
     expect(auth).toContain('vault_private_access')
     expect(screen).not.toContain('sessionStorage')
